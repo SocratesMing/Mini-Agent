@@ -1,7 +1,7 @@
 """Anthropic LLM client implementation."""
 
 import logging
-from typing import Any
+from typing import Any, AsyncGenerator
 
 import anthropic
 
@@ -253,6 +253,94 @@ class AnthropicClient(LLMClientBase):
             finish_reason=response.stop_reason or "stop",
             usage=usage,
         )
+
+    async def _make_streaming_request(
+        self,
+        system_message: str | None,
+        api_messages: list[dict[str, Any]],
+        tools: list[Any] | None = None,
+    ):
+        """Execute streaming API request (core method that can be retried).
+
+        Args:
+            system_message: Optional system message
+            api_messages: List of messages in Anthropic format
+            tools: Optional list of tools
+
+        Returns:
+            Async iterator of Anthropic Message response events
+        """
+        params = {
+            "model": self.model,
+            "max_tokens": 16384,
+            "messages": api_messages,
+        }
+
+        if system_message:
+            params["system"] = system_message
+
+        if tools:
+            params["tools"] = self._convert_tools(tools)
+
+        # Use Anthropic SDK's async messages.stream for streaming
+        async with self.client.messages.stream(**params) as stream:
+            async for event in stream:
+                yield event
+
+    async def stream_generate(
+        self,
+        messages: list[Message],
+        tools: list[Any] | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """Generate streaming response from Anthropic LLM.
+
+        Args:
+            messages: List of conversation messages
+            tools: Optional list of available tools
+
+        Yields:
+            Text chunks as they are generated
+        """
+        # Prepare request
+        request_params = self._prepare_request(messages, tools)
+
+        # Make streaming API request with retry logic
+        if self.retry_config.enabled:
+            # For streaming, we need to handle retry differently
+            # Create a wrapper that yields from the streaming response
+            async def streaming_call():
+                return self._make_streaming_request(
+                    request_params["system_message"],
+                    request_params["api_messages"],
+                    request_params["tools"],
+                )
+            
+            retry_decorator = async_retry(config=self.retry_config, on_retry=self.retry_callback)
+            wrapped_stream = retry_decorator(streaming_call)
+            stream_iterator = await wrapped_stream()
+        else:
+            # Don't use retry
+            stream_iterator = self._make_streaming_request(
+                request_params["system_message"],
+                request_params["api_messages"],
+                request_params["tools"],
+            )
+
+        # Parse and yield streaming text
+        async for event in stream_iterator:
+            if event.type == "content_block_delta":
+                if event.delta.type == "text_delta":
+                    yield event.delta.text
+                elif event.delta.type == "thinking_delta":
+                    yield f"[THINKING]{event.delta.thinking}[/THINKING]"
+            elif event.type == "content_block_start":
+                if hasattr(event, "content_block") and event.content_block:
+                    if event.content_block.type == "thinking":
+                        if hasattr(event.content_block, "thinking"):
+                            yield f"[THINKING]{event.content_block.thinking}[/THINKING]"
+                    elif event.content_block.type == "text":
+                        if hasattr(event.content_block, "text"):
+                            yield event.content_block.text
 
     async def generate(
         self,

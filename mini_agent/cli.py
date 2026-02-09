@@ -294,6 +294,7 @@ def parse_args() -> argparse.Namespace:
 Examples:
   mini-agent                              # Use current directory as workspace
   mini-agent --workspace /path/to/dir     # Use specific workspace directory
+  mini-agent --stream                     # Enable streaming response
   mini-agent log                          # Show log directory and recent files
   mini-agent log agent_run_xxx.log        # Read a specific log file
         """,
@@ -304,6 +305,13 @@ Examples:
         type=str,
         default=None,
         help="Workspace directory (default: current directory)",
+    )
+    parser.add_argument(
+        "--stream",
+        "-s",
+        action="store_true",
+        default=False,
+        help="Enable streaming response for real-time output",
     )
     parser.add_argument(
         "--version",
@@ -456,11 +464,12 @@ def add_workspace_tools(tools: List[Tool], config: Config, workspace_dir: Path):
         print(f"{Colors.GREEN}✅ Loaded session note tool{Colors.RESET}")
 
 
-async def run_agent(workspace_dir: Path):
+async def run_agent(workspace_dir: Path, stream: bool = False):
     """Run interactive Agent
 
     Args:
         workspace_dir: Workspace directory path
+        stream: Whether to use streaming mode
     """
     session_start = datetime.now()
 
@@ -644,6 +653,7 @@ async def run_agent(workspace_dir: Path):
                 enable_history_search=True,
             )
             user_input = user_input.strip()
+            print("debug ->","user_input",user_input)
 
             if not user_input:
                 continue
@@ -703,6 +713,7 @@ async def run_agent(workspace_dir: Path):
             print(
                 f"\n{Colors.BRIGHT_BLUE}Agent{Colors.RESET} {Colors.DIM}›{Colors.RESET} {Colors.DIM}Thinking... (Esc to cancel){Colors.RESET}\n"
             )
+            # 智能体添加消息
             agent.add_user_message(user_input)
 
             # Create cancellation event
@@ -763,7 +774,11 @@ async def run_agent(workspace_dir: Path):
 
             # Run agent with periodic cancellation check
             try:
-                agent_task = asyncio.create_task(agent.run())
+                # 调用智能体 - 选择流式或非流式
+                if stream:
+                    agent_task = asyncio.create_task(agent.run_stream(cancel_event=cancel_event))
+                else:
+                    agent_task = asyncio.create_task(agent.run(cancel_event=cancel_event))
 
                 # Poll for cancellation while agent runs
                 while not agent_task.done():
@@ -827,7 +842,7 @@ def main():
     workspace_dir.mkdir(parents=True, exist_ok=True)
 
     # Run the agent (config always loaded from package directory)
-    asyncio.run(run_agent(workspace_dir))
+    asyncio.run(run_agent(workspace_dir, stream=args.stream))
 
 
 if __name__ == "__main__":

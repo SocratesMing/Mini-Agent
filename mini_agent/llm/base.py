@@ -1,7 +1,7 @@
 """Base class for LLM clients."""
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from ..retry import RetryConfig
 from ..schema import LLMResponse, Message
@@ -51,6 +51,23 @@ class LLMClientBase(ABC):
 
         Returns:
             LLMResponse containing the generated content, thinking, and tool calls
+        """
+        pass
+
+    @abstractmethod
+    async def stream_generate(
+        self,
+        messages: list[Message],
+        tools: list[Any] | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream generate response from LLM.
+
+        Args:
+            messages: List of conversation messages
+            tools: Optional list of Tool objects or dicts
+
+        Yields:
+            Text chunks as they are generated
         """
         pass
 

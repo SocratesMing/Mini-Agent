@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from openai import AsyncOpenAI
 
@@ -293,3 +293,42 @@ class OpenAIClient(LLMClientBase):
 
         # Parse and return response
         return self._parse_response(response)
+
+    async def stream_generate(
+        self,
+        messages: list[Message],
+        tools: list[Any] | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream generate response from OpenAI LLM.
+
+        Args:
+            messages: List of conversation messages
+            tools: Optional list of Tool objects or dicts
+
+        Yields:
+            Text chunks as they are generated
+        """
+        _, api_messages = self._convert_messages(messages)
+
+        params = {
+            "model": self.model,
+            "messages": api_messages,
+            "stream": True,
+            "extra_body": {"reasoning_split": True},
+        }
+
+        if tools:
+            params["tools"] = self._convert_tools(tools)
+
+        response_stream = self.client.chat.completions.create(**params)
+
+        async for chunk in response_stream:
+            if chunk.choices and len(chunk.choices) > 0:
+                delta = chunk.choices[0].delta
+                if delta:
+                    if delta.content:
+                        yield delta.content
+                    if hasattr(delta, "reasoning_details") and delta.reasoning_details:
+                        for detail in delta.reasoning_details:
+                            if hasattr(detail, "text"):
+                                yield f"[THINKING]{detail.text}[/THINKING]"
