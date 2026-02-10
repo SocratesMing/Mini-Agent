@@ -22,11 +22,17 @@ dependencies = [
     "anthropic>=0.39.0",
     "openai>=1.57.4",
     "agent-client-protocol>=0.6.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "sqlalchemy>=2.0.0",
+    "pymysql>=1.1.0",
+    "pydantic>=2.0.0",
 ]
 
 [project.scripts]
 mini-agent = "mini_agent.cli:main"
 mini-agent-acp = "mini_agent.acp.server:main"
+mini-agent-api = "api_server:main"
 
 [project.optional-dependencies]
 dev = [

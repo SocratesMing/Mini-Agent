@@ -320,7 +320,7 @@ class OpenAIClient(LLMClientBase):
         if tools:
             params["tools"] = self._convert_tools(tools)
 
-        response_stream = self.client.chat.completions.create(**params)
+        response_stream = await self.client.chat.completions.create(**params)
 
         async for chunk in response_stream:
             if chunk.choices and len(chunk.choices) > 0:
