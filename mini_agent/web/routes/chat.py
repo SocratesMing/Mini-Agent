@@ -385,12 +385,21 @@ async def chat_stream(
         now = datetime.now().isoformat()
         session_data = SessionModel(
             session_id=session_id,
-            title=request.message[:50] + "..." if len(request.message) > 50 else request.message,
+            title=request.message[:5] + "..." if len(request.message) > 5 else request.message,
             messages=[],
             created_at=now,
             updated_at=now,
         )
         db.create_session(session_data)
+        logger.info(f"新建会话 | ID: {session_id} | 标题: {session_data.title}")
+    else:
+        session = db.get_session(session_id)
+        if session and len(session.messages) == 0:
+            new_title = request.message[:5] + "..." if len(request.message) > 5 else request.message
+            session.title = new_title
+            session.updated_at = datetime.now().isoformat()
+            db.update_session(session)
+            logger.info(f"更新会话标题 | ID: {session_id} | 新标题: {new_title}")
     
     user_message = {
         "role": "user",
@@ -447,7 +456,7 @@ async def chat(
         now = datetime.now().isoformat()
         session_data = SessionModel(
             session_id=session_id,
-            title=request.message[:50] + "..." if len(request.message) > 50 else request.message,
+            title=request.message[:5] + "..." if len(request.message) > 5 else request.message,
             messages=[],
             created_at=now,
             updated_at=now,
