@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import logging
 import os
 import sys
 import uuid
@@ -21,6 +22,37 @@ from mini_agent.web.database import Database, init_database as init_db
 
 agent_config = None
 db_instance = None
+
+
+def setup_logging():
+    """配置日志：同时输出到控制台和文件."""
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    
+    log_file = log_dir / "mini_agent.log"
+    
+    formatter = logging.Formatter(
+        fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+    
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
+    
+    logging.getLogger("uvicorn").setLevel(logging.INFO)
+    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+    
+    return log_file
 
 
 def load_system_prompt(path: str) -> str:
@@ -44,15 +76,46 @@ async def lifespan(app: FastAPI):
     
     os.chdir(project_root)
     
+    log_file = setup_logging()
+    logger = logging.getLogger(__name__)
+    logger.info(f"日志文件: {log_file}")
+    
+    def get_tools(enable_file_tools: bool, enable_bash: bool, enable_note: bool) -> list:
+        """获取基础工具列表."""
+        from mini_agent.tools import BashTool, ReadTool, WriteTool, EditTool, SessionNoteTool
+        tools = []
+        
+        if enable_bash:
+            tools.append(BashTool())
+        
+        if enable_file_tools:
+            tools.extend([
+                ReadTool(workspace_dir=str(project_root / "workspace")),
+                WriteTool(workspace_dir=str(project_root / "workspace")),
+                EditTool(workspace_dir=str(project_root / "workspace")),
+            ])
+        
+        if enable_note:
+            tools.append(SessionNoteTool(memory_file=str(project_root / "workspace" / ".agent_memory.json")))
+        
+        return tools
+    
     try:
         from mini_agent.config import Config as AppConfig
-        from mini_agent.tools import get_basic_tools
         from mini_agent.llm import LLMClient
+        from mini_agent.schema import LLMProvider
         
         app_config = AppConfig.load()
         
-        llm_client = LLMClient.from_config(app_config.llm)
-        tools = get_basic_tools(
+        provider = LLMProvider.ANTHROPIC if app_config.llm.provider == "anthropic" else LLMProvider.OPENAI
+        llm_client = LLMClient(
+            api_key=app_config.llm.api_key,
+            provider=provider,
+            api_base=app_config.llm.api_base,
+            model=app_config.llm.model,
+            retry_config=app_config.llm.retry,
+        )
+        tools = get_tools(
             enable_file_tools=app_config.tools.enable_file_tools,
             enable_bash=app_config.tools.enable_bash,
             enable_note=app_config.tools.enable_note,
@@ -67,16 +130,20 @@ async def lifespan(app: FastAPI):
             "workspace_dir": app_config.agent.workspace_dir,
         }
         
+        logger.info("Agent 配置加载成功")
+        
     except Exception as e:
-        print(f"Warning: Failed to load config: {e}")
+        logger.warning(f"加载配置失败: {e}")
         agent_config = None
     
     db_instance = init_db()
+    logger.info("数据库初始化完成")
     
     yield
     
     if db_instance:
         db_instance.close()
+    logger.info("服务器关闭")
 
 
 app = FastAPI(

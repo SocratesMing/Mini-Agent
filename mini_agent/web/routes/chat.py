@@ -5,6 +5,7 @@
 """
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Annotated, AsyncGenerator, Optional
@@ -22,6 +23,84 @@ from mini_agent.web.models import (
     ChatResponse,
     GetChatHistoryResponse,
 )
+
+logger = logging.getLogger(__name__)
+
+
+class StreamLogger:
+    """流式响应日志记录器."""
+
+    def __init__(self, session_id: str, message_id: str, user_message: str):
+        self.session_id = session_id
+        self.message_id = message_id
+        self.user_message = user_message
+        self.start_time = datetime.now()
+        self.chunk_count = 0
+        self.thinking_count = 0
+        self.tool_calls = []
+        self._logger = logging.getLogger("mini_agent.chat")
+        self._content_buffer = ""
+
+    def log_request(self):
+        """记录请求开始."""
+        self._logger.info(f"收到聊天请求 | 会话ID: {self.session_id} | 消息ID: {self.message_id}")
+        self._logger.debug(f"用户消息: {self.user_message[:200]}...")
+
+    def log_llm_request(self, messages: list, tools: list):
+        """记录 LLM 请求信息."""
+        self._logger.info(f"发送请求到 LLM | 消息数: {len(messages)} | 工具数: {len(tools)}")
+        
+        for i, msg in enumerate(messages[-3:], 1):
+            if hasattr(msg, 'role'):
+                role = msg.role
+                content = getattr(msg, 'content', '')[:100]
+            else:
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")[:100]
+            self._logger.debug(f"  [{i}] {role}: {content}...")
+        
+        for tool in tools[:5]:
+            if hasattr(tool, 'name'):
+                tool_name = tool.name
+                tool_desc = getattr(tool, 'description', '')[:60]
+            else:
+                tool_name = tool.get('name', 'unknown')
+                tool_desc = tool.get('description', '')[:60]
+            self._logger.debug(f"  🔧 {tool_name}: {tool_desc}...")
+
+    def log_thinking(self, thinking: str):
+        """记录思考内容."""
+        self.thinking_count += 1
+        self._logger.debug(f"思考 #{self.thinking_count}: {thinking[:80]}...")
+
+    def log_content_chunk(self, chunk: str, is_first: bool):
+        """记录内容块."""
+        self._content_buffer += chunk
+        if is_first:
+            self._logger.info("开始生成响应")
+
+    def log_tool_call(self, tool_name: str, arguments: dict):
+        """记录工具调用."""
+        self.tool_calls.append(tool_name)
+        self._logger.info(f"调用工具: {tool_name}")
+        self._logger.debug(f"  参数: {json.dumps(arguments, ensure_ascii=False, indent=2)[:200]}")
+
+    def log_tool_result(self, tool_name: str, success: bool, result: str = None):
+        """记录工具执行结果."""
+        status = "成功" if success else "失败"
+        self._logger.info(f"工具 {tool_name} 执行{status}")
+        if result and len(str(result)) > 100:
+            self._logger.debug(f"  结果预览: {str(result)[:100]}...")
+
+    def log_response_complete(self, full_response: str, thinking: str = None):
+        """记录响应完成."""
+        elapsed = (datetime.now() - self.start_time).total_seconds()
+        self._logger.info(f"响应完成 | 耗时: {elapsed:.2f}s | 字符数: {len(full_response)} | 思考事件: {self.thinking_count} | 工具调用: {len(self.tool_calls)}")
+        self._logger.debug(f"完整响应内容: {full_response[:500]}...")
+
+    def log_error(self, error: str):
+        """记录错误."""
+        self._logger.error(f"错误: {error}")
 
 
 router = APIRouter(
@@ -122,40 +201,72 @@ async def chat_stream_generator(
     message_id: str,
 ) -> AsyncGenerator[str, None]:
     """生成聊天流式响应."""
+    stream_logger = StreamLogger(session_id, message_id, request.message)
+    stream_logger.log_request()
+    
     session = db.get_session(session_id)
     
     if session is None:
-        yield f"data: {json.dumps({'type': 'error', 'content': '会话不存在'}, ensure_ascii=False)}\n\n"
+        error_msg = "会话不存在"
+        stream_logger.log_error(error_msg)
+        yield f"data: {json.dumps({'type': 'error', 'content': error_msg}, ensure_ascii=False)}\n\n"
         return
     
     full_response = ""
     thinking_content = None
     thinking_started = False
     assistant_started = False
+    tool_calls_count = 0
     
     try:
         yield f"data: {json.dumps({'type': 'start', 'session_id': session_id, 'message_id': message_id}, ensure_ascii=False)}\n\n"
         
-        tool_list = list(agent.tools.values())
-        
-        async for chunk in agent.llm.stream_generate(messages=agent.messages, tools=tool_list):
-            if "[THINKING]" in chunk and "[/THINKING]" in chunk:
-                thinking_text = chunk.replace("[THINKING]", "").replace("[/THINKING]", "")
-                if not thinking_started:
-                    thinking_started = True
-                    yield f"data: {json.dumps({'type': 'thinking_start', 'content': ''}, ensure_ascii=False)}\n\n"
-                thinking_content = (thinking_content or "") + thinking_text
-                yield f"data: {json.dumps({'type': 'thinking', 'content': thinking_text}, ensure_ascii=False)}\n\n"
-            else:
-                if chunk and not assistant_started:
-                    assistant_started = True
-                    yield f"data: {json.dumps({'type': 'assistant_start', 'content': ''}, ensure_ascii=False)}\n\n"
-                if chunk:
-                    full_response += chunk
-                    yield f"data: {json.dumps({'type': 'content', 'content': chunk}, ensure_ascii=False)}\n\n"
+        async for event in agent.run_stream(request.message):
+            event_type = event.get("type", "unknown")
+            
+            if event_type == "thinking_start":
+                thinking_started = True
+                stream_logger.log_thinking("")
+            elif event_type == "thinking":
+                content = event.get("content", "")
+                thinking_content = (thinking_content or "") + content
+                stream_logger.log_thinking(content)
+                yield f"data: {json.dumps({'type': 'thinking', 'content': content}, ensure_ascii=False)}\n\n"
+            elif event_type == "assistant_start":
+                assistant_started = True
+                stream_logger.log_content_chunk("", True)
+                yield f"data: {json.dumps({'type': 'assistant_start', 'content': ''}, ensure_ascii=False)}\n\n"
+            elif event_type == "content":
+                content = event.get("content", "")
+                full_response += content
+                stream_logger.log_content_chunk(content, False)
+                yield f"data: {json.dumps({'type': 'content', 'content': content}, ensure_ascii=False)}\n\n"
+            elif event_type == "tool_call":
+                tool_name = event.get("tool_name", "")
+                arguments = event.get("arguments", {})
+                tool_calls_count += 1
+                stream_logger.log_tool_call(tool_name, arguments)
+                yield f"data: {json.dumps({'type': 'tool_call', 'tool_name': tool_name, 'arguments': arguments}, ensure_ascii=False)}\n\n"
+            elif event_type == "tool_result":
+                tool_name = event.get("tool_name", "")
+                success = event.get("success", False)
+                result = event.get("result", "")
+                stream_logger.log_tool_result(tool_name, success, result)
+                yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': tool_name, 'success': success, 'result': result}, ensure_ascii=False)}\n\n"
+            elif event_type == "done":
+                thinking_content = event.get("thinking", None)
+                steps = event.get("steps", 1)
+                tool_calls = event.get("tool_calls", 0)
+                stream_logger.log_response_complete(full_response, thinking_content)
+                yield f"data: {json.dumps({'type': 'done', 'session_id': session_id, 'message_id': message_id, 'content': full_response, 'steps': steps, 'tool_calls': tool_calls}, ensure_ascii=False)}\n\n"
+            elif event_type == "error":
+                error_msg = event.get("content", "")
+                stream_logger.log_error(error_msg)
+                yield f"data: {json.dumps({'type': 'error', 'content': error_msg}, ensure_ascii=False)}\n\n"
                     
     except Exception as e:
         error_msg = str(e)
+        stream_logger.log_error(error_msg)
         yield f"data: {json.dumps({'type': 'error', 'content': error_msg}, ensure_ascii=False)}\n\n"
         return
     
@@ -166,8 +277,6 @@ async def chat_stream_generator(
         "thinking": thinking_content,
     }
     db.add_message(session_id, assistant_message)
-    
-    yield f"data: {json.dumps({'type': 'done', 'session_id': session_id, 'message_id': message_id, 'content': full_response}, ensure_ascii=False)}\n\n"
 
 
 def get_agent_components():
@@ -327,6 +436,10 @@ async def chat(
     if not request.message:
         raise HTTPException(status_code=400, detail="消息内容不能为空")
     
+    message_id = str(uuid.uuid4())
+    stream_logger = StreamLogger("sync", message_id, request.message)
+    stream_logger.log_request()
+    
     session_id = request.session_id
     
     if session_id is None:
@@ -364,6 +477,9 @@ async def chat(
         components["workspace_dir"],
     )
     
+    tool_list = list(agent.tools.values())
+    stream_logger.log_llm_request(agent.messages, tool_list)
+    
     full_response = ""
     thinking_content = None
     
@@ -371,10 +487,12 @@ async def chat(
         async for chunk in agent.run_stream(request.message):
             if "[THINKING]" in chunk and "[/THINKING]" in chunk:
                 thinking_text = chunk.replace("[THINKING]", "").replace("[/THINKING]", "")
+                stream_logger.log_thinking(thinking_text)
                 thinking_content = (thinking_content or "") + thinking_text
             else:
                 full_response += chunk
     except Exception as e:
+        stream_logger.log_error(str(e))
         raise HTTPException(status_code=500, detail=str(e))
     
     assistant_message = {
@@ -384,6 +502,8 @@ async def chat(
         "thinking": thinking_content,
     }
     db.add_message(session_id, assistant_message)
+    
+    stream_logger.log_response_complete(full_response, thinking_content)
     
     return ChatResponse(
         session_id=session_id,

@@ -119,27 +119,24 @@ class StreamingChatTester:
                         if event_type == "thinking":
                             thinking_events += 1
                             accumulated_thinking += content
-                            if len(accumulated_thinking) <= 100:
-                                print(f"\r[思考] {accumulated_thinking}...", end="", flush=True)
-                            else:
-                                print(f"\r[思考] {accumulated_thinking[:100]}...", end="", flush=True)
+                            print(content, end="", flush=True)
                         elif event_type == "content":
                             content_events += 1
                             total_chars += len(content)
                             accumulated_content += content
-                            display_len = min(len(accumulated_content), 80)
-                            print(f"\r[内容] {accumulated_content[:display_len]}", end="", flush=True)
+                            print(content, end="", flush=True)
                         elif event_type == "assistant_start":
-                            print()  # 换行
-                            print("-" * 60)
-                            print("AI 响应:")
-                            print("-" * 60)
+                            print("\n🤖 AI 响应中...")
+                        elif event_type == "tool_call":
+                            tool_name = data.get("tool_name", "")
+                            print(f"\n🔧 调用工具: {tool_name}")
+                        elif event_type == "tool_result":
+                            tool_name = data.get("tool_name", "")
+                            success = data.get("success", False)
+                            print(f"  {'✓' if success else '✗'} {tool_name}")
                         elif event_type == "done":
                             done_events += 1
-                            print()  # 换行
-                            print(f"\n{'='*60}")
-                            print("✓ 流式响应完成")
-                            print(f"{'='*60}")
+                            print("\n✅ 流式响应完成")
 
                         # 提取会话ID
                         if "session_id" in data and response_session_id is None:
@@ -150,11 +147,22 @@ class StreamingChatTester:
                             response_message_id = data["message_id"]
 
                         # 显示完成信号（只显示一次）
-                        if is_final:
+                        if event_type == "done":
                             stats = data.get("stats", {})
-                            thinking_preview = accumulated_thinking[:50] + "..." if len(accumulated_thinking) > 50 else accumulated_thinking
-                            print(f"\n统计信息:")
-                            print(f"  - 思考内容: {thinking_preview}")
+                            thinking_from_done = data.get("thinking", "")
+                            if thinking_from_done:
+                                accumulated_thinking = thinking_from_done
+                            print(f"\n{'='*60}")
+                            print("📝 完整响应内容")
+                            print(f"{'='*60}")
+                            print(accumulated_content)
+                            print(f"{'='*60}\n")
+                            if accumulated_thinking:
+                                print(f"\n🧠 思考内容:")
+                                print(f"{'='*60}")
+                                print(accumulated_thinking)
+                                print(f"{'='*60}\n")
+                            print("统计信息:")
                             print(f"  - 思考事件数: {thinking_events}")
                             print(f"  - 内容事件数: {content_events}")
                             print(f"  - 总字符数: {total_chars}")

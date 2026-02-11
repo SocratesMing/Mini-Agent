@@ -4,7 +4,7 @@ import asyncio
 import json
 from pathlib import Path
 from time import perf_counter
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
 import tiktoken
 
@@ -418,14 +418,26 @@ Requirements:
 
     async def run_stream(
         self,
+        user_message: str,
         cancel_event: Optional[asyncio.Event] = None,
-    ) -> str:
-        """Execute agent loop with streaming output for text-only responses."""
+    ) -> AsyncGenerator[dict, None]:
+        """Execute agent loop with structured streaming output.
+
+        Yields:
+            dict: Event dictionaries with types:
+                - thinking: thinking content chunks
+                - content: assistant response content chunks
+                - tool_call: tool call detected
+                - tool_result: tool execution result
+                - done: final completion with full response
+        """
         if cancel_event is not None:
             self.cancel_event = cancel_event
 
         self.logger.start_new_run()
         print(f"{Colors.DIM}📝 Log file: {self.logger.get_log_file_path()}{Colors.RESET}")
+
+        self.add_user_message(user_message)
 
         step = 0
         run_start_time = perf_counter()
@@ -433,9 +445,8 @@ Requirements:
         while step < self.max_steps:
             if self._check_cancelled():
                 self._cleanup_incomplete_messages()
-                cancel_msg = "Task cancelled by user."
-                print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
-                return cancel_msg
+                yield {"type": "error", "content": "Task cancelled by user."}
+                return
 
             step_start_time = perf_counter()
             await self._summarize_messages()
@@ -453,12 +464,12 @@ Requirements:
 
             self.logger.log_request(messages=self.messages, tools=tool_list)
 
-            try:
-                full_content = ""
-                thinking_content = None
-                thinking_started = False
-                assistant_started = False
+            full_content = ""
+            thinking_content = None
+            thinking_started = False
+            assistant_started = False
 
+            try:
                 async for chunk in self.llm.stream_generate(messages=self.messages, tools=tool_list):
                     if "[THINKING]" in chunk and "[/THINKING]" in chunk:
                         thinking_text = chunk.replace("[THINKING]", "").replace("[/THINKING]", "")
@@ -466,16 +477,20 @@ Requirements:
                             thinking_started = True
                             print(f"\n{Colors.BOLD}{Colors.MAGENTA}🧠 Thinking:{Colors.RESET}")
                             print(f"{Colors.DIM}", end="", flush=True)
+                            yield {"type": "thinking_start", "content": ""}
                         print(thinking_text, end="", flush=True)
                         thinking_content = (thinking_content or "") + thinking_text
+                        yield {"type": "thinking", "content": thinking_text}
                     else:
                         if chunk and not assistant_started:
                             assistant_started = True
                             print(f"\n{Colors.BOLD}{Colors.BRIGHT_BLUE}🤖 Assistant:{Colors.RESET}")
                             print(f"{Colors.CYAN}", end="", flush=True)
+                            yield {"type": "assistant_start", "content": ""}
                         if chunk:
                             print(chunk, end="", flush=True)
                             full_content += chunk
+                            yield {"type": "content", "content": chunk}
 
                 print(f"{Colors.RESET}")
 
@@ -506,13 +521,19 @@ Requirements:
                     step_elapsed = perf_counter() - step_start_time
                     total_elapsed = perf_counter() - run_start_time
                     print(f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}")
-                    return response.content
+                    yield {
+                        "type": "done",
+                        "content": response.content,
+                        "thinking": response.thinking,
+                        "steps": step + 1,
+                        "tool_calls": 0,
+                    }
+                    return
 
                 if self._check_cancelled():
                     self._cleanup_incomplete_messages()
-                    cancel_msg = "Task cancelled by user."
-                    print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
-                    return cancel_msg
+                    yield {"type": "error", "content": "Task cancelled by user."}
+                    return
 
                 for tool_call in response.tool_calls:
                     tool_call_id = tool_call.id
@@ -532,6 +553,13 @@ Requirements:
                     args_json = json.dumps(truncated_args, indent=2, ensure_ascii=False)
                     for line in args_json.split("\n"):
                         print(f"   {Colors.DIM}{line}{Colors.RESET}")
+
+                    yield {
+                        "type": "tool_call",
+                        "tool_name": function_name,
+                        "arguments": arguments,
+                        "tool_call_id": tool_call_id,
+                    }
 
                     if function_name not in self.tools:
                         result = ToolResult(
@@ -562,6 +590,13 @@ Requirements:
                         result_error=result.error if not result.success else None,
                     )
 
+                    yield {
+                        "type": "tool_result",
+                        "tool_name": function_name,
+                        "success": result.success,
+                        "result": result.content if result.success else result.error,
+                    }
+
                     if result.success:
                         result_text = result.content
                         if len(result_text) > 300:
@@ -580,9 +615,8 @@ Requirements:
 
                     if self._check_cancelled():
                         self._cleanup_incomplete_messages()
-                        cancel_msg = "Task cancelled by user."
-                        print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
-                        return cancel_msg
+                        yield {"type": "error", "content": "Task cancelled by user."}
+                        return
 
                 step_elapsed = perf_counter() - step_start_time
                 total_elapsed = perf_counter() - run_start_time
@@ -599,11 +633,12 @@ Requirements:
                 else:
                     error_msg = f"LLM call failed: {str(e)}"
                     print(f"\n{Colors.BRIGHT_RED}❌ Error:{Colors.RESET} {error_msg}")
-                return error_msg
+                yield {"type": "error", "content": error_msg}
+                return
 
         error_msg = f"Task couldn't be completed after {self.max_steps} steps."
         print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {error_msg}{Colors.RESET}")
-        return error_msg
+        yield {"type": "error", "content": error_msg}
 
     def get_history(self) -> list[Message]:
         """Get message history."""
