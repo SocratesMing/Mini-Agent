@@ -30,6 +30,16 @@ export async function deleteSession(sessionId) {
   return response.json()
 }
 
+export async function renameSession(sessionId, title) {
+  const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/title`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title })
+  })
+  if (!response.ok) throw new Error('重命名会话失败')
+  return response.json()
+}
+
 export async function getChatHistory(sessionId) {
   const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`)
   if (!response.ok) throw new Error('获取聊天历史失败')

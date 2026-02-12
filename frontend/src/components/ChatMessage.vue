@@ -1,15 +1,6 @@
 <template>
   <div class="message" :class="[message.role]">
-    <div class="message-avatar">
-      <img v-if="message.role === 'assistant'" src="https://api.dicebear.com/7.x/bottts/svg?seed=mini-agent" alt="AI" />
-      <div v-else class="user-avatar">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-        </svg>
-      </div>
-    </div>
     <div class="message-content">
-      <div class="message-role">{{ message.role === 'assistant' ? 'AI' : '你' }}</div>
       <div v-if="message.thinking" class="thinking-block">
         <div class="thinking-header" @click="showThinking = !showThinking">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: showThinking }">
@@ -54,7 +45,7 @@ const renderedContent = computed(() => {
 .message {
   display: flex;
   gap: 12px;
-  padding: 16px 0;
+  padding: 12px 0;
   animation: fadeIn 0.3s ease-out;
 }
 
@@ -70,43 +61,11 @@ const renderedContent = computed(() => {
 }
 
 .message.user {
-  flex-direction: row-reverse;
-}
-
-.message-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  overflow: hidden;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.message-avatar img {
-  width: 100%;
-  height: 100%;
-}
-
-.user-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #0ea5e9, #0284c7);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: white;
-}
-
-.user-avatar svg {
-  width: 20px;
-  height: 20px;
+  justify-content: flex-end;
 }
 
 .message-content {
-  max-width: calc(100% - 60px);
+  max-width: 100%;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -114,13 +73,6 @@ const renderedContent = computed(() => {
 
 .message.user .message-content {
   align-items: flex-end;
-}
-
-.message-role {
-  font-size: 12px;
-  color: #64748b;
-  font-weight: 500;
-  margin-bottom: 4px;
 }
 
 .thinking-block {
@@ -172,7 +124,6 @@ const renderedContent = computed(() => {
   background: #f1f5f9;
   padding: 12px 16px;
   border-radius: 16px;
-  border-top-left-radius: 4px;
   font-size: 14px;
   line-height: 1.6;
   color: #1e293b;
@@ -221,7 +172,6 @@ const renderedContent = computed(() => {
   background: #0ea5e9;
   color: white;
   border-radius: 16px;
-  border-top-right-radius: 4px;
 }
 
 .message.user .message-text :deep(pre) {

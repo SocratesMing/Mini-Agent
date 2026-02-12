@@ -1,14 +1,33 @@
 <template>
   <div class="app-container">
     <SessionList
+      v-show="!isSidebarCollapsed"
       :sessions="sessions"
       :currentSessionId="currentSessionId"
       @createSession="handleCreateSession"
       @selectSession="handleSelectSession"
       @deleteSession="handleDeleteSession"
+      @renameSession="handleRenameSession"
+      @toggleSidebar="toggleSidebar"
+      @showAssets="handleShowAssets"
     />
     
+    <button 
+      v-if="isSidebarCollapsed"
+      class="expand-sidebar-btn"
+      @click="toggleSidebar"
+      title="展开侧边栏"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+        <line x1="9" y1="3" x2="9" y2="21"></line>
+      </svg>
+    </button>
+    
+    <AssetsPanel v-if="showAssets" @close="showAssets = false" />
+    
     <Chat
+      v-else
       :messages="messages"
       :currentSessionId="currentSessionId"
       :isStreaming="isStreaming"
@@ -27,7 +46,8 @@
 import { ref, onMounted } from 'vue'
 import SessionList from './components/SessionList.vue'
 import Chat from './components/Chat.vue'
-import { createSession, listSessions, getChatHistory, deleteSession, sendMessage } from './api/chat.js'
+import AssetsPanel from './components/AssetsPanel.vue'
+import { createSession, listSessions, getChatHistory, deleteSession, sendMessage, renameSession } from './api/chat.js'
 import { uploadFile } from './api/files.js'
 
 const sessions = ref([])
@@ -35,6 +55,16 @@ const currentSessionId = ref(null)
 const messages = ref([])
 const isStreaming = ref(false)
 const error = ref(null)
+const isSidebarCollapsed = ref(false)
+const showAssets = ref(false)
+
+function toggleSidebar() {
+  isSidebarCollapsed.value = !isSidebarCollapsed.value
+}
+
+function handleShowAssets() {
+  showAssets.value = !showAssets.value
+}
 
 async function loadSessions() {
   try {
@@ -46,10 +76,23 @@ async function loadSessions() {
   }
 }
 
-async function handleCreateSession() {
-  try {
+async function ensureCurrentSession(initialTitle = '') {
+  if (!currentSessionId.value) {
     const newSession = await createSession('')
     currentSessionId.value = newSession.session_id
+    sessions.value.unshift({
+      session_id: newSession.session_id,
+      title: initialTitle || '新会话',
+      created_at: new Date().toISOString()
+    })
+  }
+  return currentSessionId.value
+}
+
+async function handleCreateSession() {
+  showAssets.value = false
+  try {
+    await ensureCurrentSession()
     messages.value = []
   } catch (e) {
     console.error('创建会话失败:', e)
@@ -58,6 +101,7 @@ async function handleCreateSession() {
 }
 
 async function handleSelectSession(sessionId) {
+  showAssets.value = false
   currentSessionId.value = sessionId
   isStreaming.value = true
   
@@ -87,8 +131,28 @@ async function handleDeleteSession(sessionId) {
   }
 }
 
+async function handleRenameSession(sessionId, newTitle) {
+  try {
+    await renameSession(sessionId, newTitle)
+    const idx = sessions.value.findIndex(s => s.session_id === sessionId)
+    if (idx !== -1) {
+      sessions.value[idx] = { ...sessions.value[idx], title: newTitle }
+    }
+  } catch (e) {
+    console.error('重命名会话失败:', e)
+    error.value = '重命名会话失败'
+  }
+}
+
 async function handleSendMessage(message, files = [], signal) {
-  if (!currentSessionId.value) return
+  try {
+    const title = message.substring(0, 5) || '新会话'
+    await ensureCurrentSession(title)
+  } catch (e) {
+    console.error('创建会话失败:', e)
+    error.value = '创建会话失败'
+    return
+  }
 
   const userMsgId = `user-${Date.now()}`
 
@@ -190,6 +254,37 @@ onMounted(() => {
   height: 100vh;
   width: 100vw;
   background: #f8fafc;
+  position: relative;
+}
+
+.expand-sidebar-btn {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  width: 40px;
+  height: 40px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 100;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.expand-sidebar-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.expand-sidebar-btn svg {
+  width: 20px;
+  height: 20px;
+  color: #64748b;
 }
 
 .error-toast {
@@ -212,9 +307,9 @@ onMounted(() => {
 .error-toast button {
   background: transparent;
   border: none;
-  color: #dc2626;
-  font-size: 20px;
+  font-size: 18px;
   cursor: pointer;
+  color: #dc2626;
   padding: 0;
   line-height: 1;
 }

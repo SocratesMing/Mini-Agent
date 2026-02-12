@@ -1,17 +1,48 @@
 <template>
   <div class="session-list">
     <div class="session-header">
-      <h2>CQ-Agent</h2>
-      <button @click="$emit('createSession')" class="new-chat-btn">
+      <div class="header-left">
+        <div class="logo">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+            <path d="M2 17l10 5 10-5"></path>
+            <path d="M2 12l10 5 10-5"></path>
+          </svg>
+        </div>
+        <span class="logo-text">CQ-Agent</span>
+      </div>
+      <button @click="$emit('toggleSidebar')" class="collapse-btn" title="收起侧边栏">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="15" y1="3" x2="15" y2="21"></line>
+        </svg>
+      </button>
+    </div>
+
+    <div class="action-buttons">
+      <button @click="$emit('createSession')" class="action-btn new-chat">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="12" y1="5" x2="12" y2="19"></line>
           <line x1="5" y1="12" x2="19" y2="12"></line>
         </svg>
-        新建
+        <span>新建会话</span>
+      </button>
+      
+      <button @click="$emit('showAssets')" class="action-btn assets">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+        </svg>
+        <span>资产</span>
       </button>
     </div>
-    
+
+    <div class="divider"></div>
+
     <div class="session-items">
+      <div class="sessions-header">
+        <span>会话列表</span>
+      </div>
+      
       <div
         v-for="session in sessions"
         :key="session.session_id"
@@ -21,14 +52,32 @@
       >
         <div class="session-info">
           <div class="session-name">{{ session.title || '未命名会话' }}</div>
-          <div class="session-time">{{ formatTime(session.updated_at) }}</div>
         </div>
-        <button @click.stop="$emit('deleteSession', session.session_id)" class="delete-btn">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="3 6 5 6 21 6"></polyline>
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-          </svg>
-        </button>
+        <div class="session-actions">
+          <button @click.stop="toggleMenu(session.session_id)" class="menu-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="12" cy="5" r="2"></circle>
+              <circle cx="12" cy="12" r="2"></circle>
+              <circle cx="12" cy="19" r="2"></circle>
+            </svg>
+          </button>
+          <div v-if="activeMenu === session.session_id" class="menu-dropdown">
+            <button @click.stop="startRename(session)" class="menu-item">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+              </svg>
+              重命名
+            </button>
+            <button @click.stop="handleDelete(session.session_id)" class="menu-item delete">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              删除
+            </button>
+          </div>
+        </div>
       </div>
       
       <div v-if="sessions.length === 0" class="empty-state">
@@ -38,11 +87,30 @@
         <p>暂无会话</p>
       </div>
     </div>
+
+    <div v-if="showRenameModal" class="modal-overlay" @click="cancelRename">
+      <div class="modal-content" @click.stop>
+        <h3>重命名会话</h3>
+        <input
+          v-model="newTitle"
+          @keyup.enter="confirmRename"
+          @keyup.escape="cancelRename"
+          placeholder="请输入新名称"
+          ref="renameInput"
+        />
+        <div class="modal-actions">
+          <button @click="cancelRename" class="cancel-btn">取消</button>
+          <button @click="confirmRename" class="confirm-btn">确认</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-defineProps({
+import { ref, nextTick, onMounted, onUnmounted } from 'vue'
+
+const props = defineProps({
   sessions: {
     type: Array,
     default: () => []
@@ -53,20 +121,58 @@ defineProps({
   }
 })
 
-defineEmits(['createSession', 'selectSession', 'deleteSession'])
+const emit = defineEmits(['createSession', 'selectSession', 'deleteSession', 'renameSession', 'toggleSidebar', 'showAssets'])
 
-function formatTime(timestamp) {
-  if (!timestamp) return ''
-  const date = new Date(timestamp)
-  const now = new Date()
-  const diff = now - date
-  
-  if (diff < 60000) return '刚刚'
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`
-  
-  return date.toLocaleDateString('zh-CN')
+const activeMenu = ref(null)
+const showRenameModal = ref(false)
+const newTitle = ref('')
+const renamingSession = ref(null)
+const renameInput = ref(null)
+
+function toggleMenu(sessionId) {
+  activeMenu.value = activeMenu.value === sessionId ? null : sessionId
 }
+
+function startRename(session) {
+  renamingSession.value = session
+  newTitle.value = session.title || ''
+  activeMenu.value = null
+  showRenameModal.value = true
+  nextTick(() => {
+    renameInput.value?.focus()
+    renameInput.value?.select()
+  })
+}
+
+function cancelRename() {
+  showRenameModal.value = false
+  renamingSession.value = null
+  newTitle.value = ''
+}
+
+function confirmRename() {
+  if (newTitle.value.trim() && renamingSession.value) {
+    emit('renameSession', renamingSession.value.session_id, newTitle.value.trim())
+    cancelRename()
+  }
+}
+
+function handleDelete(sessionId) {
+  activeMenu.value = null
+  emit('deleteSession', sessionId)
+}
+
+function closeMenu() {
+  activeMenu.value = null
+}
+
+onMounted(() => {
+  document.addEventListener('click', closeMenu)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', closeMenu)
+})
 </script>
 
 <style scoped>
@@ -77,62 +183,139 @@ function formatTime(timestamp) {
   display: flex;
   flex-direction: column;
   height: 100%;
+  position: relative;
 }
 
 .session-header {
-  padding: 16px;
-  border-bottom: 1px solid #e2e8f0;
+  padding: 12px 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  border-bottom: 1px solid #f1f5f9;
 }
 
-.session-header h2 {
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo {
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, #0ea5e9 0%, #8b5cf6 100%);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo svg {
+  width: 18px;
+  height: 18px;
+  color: white;
+}
+
+.logo-text {
   font-size: 16px;
   font-weight: 600;
   color: #1e293b;
-  margin: 0;
 }
 
-.new-chat-btn {
+.collapse-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
-  background: #0ea5e9;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
+  justify-content: center;
   cursor: pointer;
   transition: all 0.2s;
 }
 
-.new-chat-btn:hover {
-  background: #0284c7;
+.collapse-btn:hover {
+  background: #f1f5f9;
 }
 
-.new-chat-btn svg {
-  width: 16px;
-  height: 16px;
+.collapse-btn svg {
+  width: 18px;
+  height: 18px;
+  color: #64748b;
+}
+
+.action-buttons {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border: 1px solid #e2e8f0;
+  background: white;
+  border-radius: 10px;
+  font-size: 14px;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.action-btn:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.action-btn.active {
+  background: #e0f2fe;
+  border-color: #0ea5e9;
+  color: #0ea5e9;
+}
+
+.action-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.action-btn.new-chat:hover {
+  background: #0ea5e9;
+  border-color: #0ea5e9;
+  color: white;
+}
+
+.divider {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 0 16px;
 }
 
 .session-items {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  padding: 12px 8px;
+}
+
+.sessions-header {
+  padding: 0 8px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #94a3b8;
 }
 
 .session-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px;
-  border-radius: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .session-item:hover {
@@ -149,7 +332,7 @@ function formatTime(timestamp) {
 }
 
 .session-name {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   color: #1e293b;
   white-space: nowrap;
@@ -157,13 +340,11 @@ function formatTime(timestamp) {
   text-overflow: ellipsis;
 }
 
-.session-time {
-  font-size: 12px;
-  color: #94a3b8;
-  margin-top: 2px;
+.session-actions {
+  position: relative;
 }
 
-.delete-btn {
+.menu-btn {
   width: 28px;
   height: 28px;
   border: none;
@@ -177,18 +358,62 @@ function formatTime(timestamp) {
   transition: all 0.2s;
 }
 
-.session-item:hover .delete-btn {
+.menu-btn svg {
+  width: 18px;
+  height: 18px;
+  color: #64748b;
+}
+
+.session-item:hover .menu-btn {
   opacity: 1;
 }
 
-.delete-btn:hover {
-  background: #fee2e2;
+.menu-btn:hover {
+  background: #e2e8f0;
+}
+
+.menu-dropdown {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+  min-width: 120px;
+  overflow: hidden;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.menu-item svg {
+  width: 16px;
+  height: 16px;
+}
+
+.menu-item:hover {
+  background: #f1f5f9;
+}
+
+.menu-item.delete {
   color: #ef4444;
 }
 
-.delete-btn svg {
-  width: 16px;
-  height: 16px;
+.menu-item.delete:hover {
+  background: #fee2e2;
 }
 
 .empty-state {
@@ -210,5 +435,86 @@ function formatTime(timestamp) {
 .empty-state p {
   font-size: 14px;
   margin: 0;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: white;
+  padding: 24px;
+  border-radius: 12px;
+  width: 320px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+.modal-content h3 {
+  margin: 0 0 16px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.modal-content input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.2s;
+  box-sizing: border-box;
+}
+
+.modal-content input:focus {
+  border-color: #0ea5e9;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.cancel-btn {
+  padding: 8px 16px;
+  border: 1px solid #e2e8f0;
+  background: white;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.cancel-btn:hover {
+  background: #f1f5f9;
+}
+
+.confirm-btn {
+  padding: 8px 16px;
+  border: none;
+  background: #0ea5e9;
+  color: white;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.confirm-btn:hover {
+  background: #0284c7;
 }
 </style>

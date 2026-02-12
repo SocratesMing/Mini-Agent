@@ -4,11 +4,13 @@
       <div v-if="messages.length === 0" class="welcome-screen">
         <div class="welcome-icon">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            <path d="M3 3v18h18"></path>
+            <path d="M7 16l4-4 4 4 5-6"></path>
+            <circle cx="20" cy="10" r="2"></circle>
           </svg>
         </div>
-        <h2>开始对话</h2>
-        <p>输入消息开始与 AI 助手交流</p>
+        <h2>我是 CQ-Agent</h2>
+        <p>请输入策略需求或因子需求</p>
       </div>
       
       <ChatMessage
@@ -16,20 +18,11 @@
         :key="msg.id"
         :message="msg"
       />
-      
-      <div v-if="isStreaming" class="streaming-indicator">
-        <div class="typing-indicator">
-          <span></span>
-          <span></span>
-          <span></span>
-        </div>
-        <span class="streaming-text">AI 正在思考...</span>
-      </div>
     </div>
     
     <ChatInput
       @send="handleSend"
-      :disabled="isStreaming || !currentSessionId"
+      :disabled="isStreaming"
       :isStreaming="isStreaming"
       @stop="handleStop"
     />
@@ -58,8 +51,8 @@ const props = defineProps({
 
 const emit = defineEmits(['sendMessage', 'stop'])
 
-function handleSend(message, files) {
-  emit('sendMessage', message, files)
+function handleSend(message, files, signal) {
+  emit('sendMessage', message, files, signal)
 }
 
 function handleStop() {
@@ -89,6 +82,14 @@ watch(() => props.messages.length, () => {
   overflow-y: auto;
   padding: 24px;
   scroll-behavior: smooth;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.chat-messages > * {
+  width: 80%;
+  max-width: 900px;
 }
 
 .welcome-screen {
@@ -101,19 +102,20 @@ watch(() => props.messages.length, () => {
 }
 
 .welcome-icon {
-  width: 80px;
-  height: 80px;
-  background: linear-gradient(135deg, #0ea5e9 0%, #8b5cf6 100%);
+  width: 88px;
+  height: 88px;
+  background: linear-gradient(135deg, #1e3a5f 0%, #0d7377 50%, #14a085 100%);
   border-radius: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 20px;
+  box-shadow: 0 8px 32px rgba(13, 115, 119, 0.3);
 }
 
 .welcome-icon svg {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   color: white;
 }
 
@@ -128,52 +130,5 @@ watch(() => props.messages.length, () => {
   font-size: 14px;
   color: #94a3b8;
   margin: 0;
-}
-
-.streaming-indicator {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 16px 20px;
-  background: rgba(14, 165, 233, 0.1);
-  border-radius: 12px;
-  margin-top: 16px;
-  width: fit-content;
-}
-
-.typing-indicator {
-  display: flex;
-  gap: 4px;
-}
-
-.typing-indicator span {
-  width: 8px;
-  height: 8px;
-  background: #0ea5e9;
-  border-radius: 50%;
-  animation: bounce 1.4s infinite ease-in-out;
-}
-
-.typing-indicator span:nth-child(1) {
-  animation-delay: -0.32s;
-}
-
-.typing-indicator span:nth-child(2) {
-  animation-delay: -0.16s;
-}
-
-@keyframes bounce {
-  0%, 80%, 100% {
-    transform: scale(0);
-  }
-  40% {
-    transform: scale(1);
-  }
-}
-
-.streaming-text {
-  font-size: 14px;
-  color: #0ea5e9;
-  font-weight: 500;
 }
 </style>

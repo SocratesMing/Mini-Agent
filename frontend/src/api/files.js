@@ -26,3 +26,13 @@ export async function getSessionFiles(sessionId) {
 
   return await response.json()
 }
+
+export async function getAllFiles() {
+  const response = await fetch(`${API_BASE_URL}/api/files/all`)
+
+  if (!response.ok) {
+    throw new Error('获取所有文件失败')
+  }
+
+  return await response.json()
+}

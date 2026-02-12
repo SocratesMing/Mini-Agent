@@ -180,8 +180,8 @@ async def update_session_title(
 )
 async def upload_file(
     session_id: str,
-    file: UploadFile = File(...),
     db: Annotated[Database, Depends(get_database)],
+    file: UploadFile = File(...),
 ):
     """上传文件到会话目录，返回文件路径供 AI 读取."""
     import shutil
@@ -239,3 +239,34 @@ async def list_session_files(
             })
     
     return {"files": files}
+
+
+@router.get(
+    "/files/all",
+    summary="获取所有文件",
+    description="获取所有会话上传的文件列表。"
+)
+async def get_all_files():
+    """获取所有会话已上传的文件列表."""
+    upload_base = Path("workspace") / "sessions"
+    
+    if not upload_base.exists():
+        return {"files": []}
+    
+    all_files = []
+    for session_dir in upload_base.iterdir():
+        if session_dir.is_dir():
+            for f in session_dir.iterdir():
+                try:
+                    if f.is_file():
+                        all_files.append({
+                            "filename": f.name,
+                            "file_path": str(f),
+                            "size": f.stat().st_size,
+                            "session_id": session_dir.name,
+                        })
+                except (OSError, PermissionError) as e:
+                    logger.warning(f"无法访问文件 {f}: {e}")
+    
+    logger.info(f"获取所有文件 | 总数: {len(all_files)}")
+    return {"files": all_files}

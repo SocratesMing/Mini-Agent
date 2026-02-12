@@ -1,70 +1,97 @@
 <template>
   <div class="chat-input-container">
-    <div v-if="uploadedFiles.length > 0" class="uploaded-files">
-      <div 
-        v-for="(file, index) in uploadedFiles" 
-        :key="index" 
-        class="uploaded-file"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="file-icon">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-          <polyline points="14 2 14 8 20 8"></polyline>
-        </svg>
-        <span class="file-name">{{ file.filename }}</span>
-        <button @click="removeFile(index)" class="remove-file-btn">×</button>
+    <div class="input-box">
+      <div v-if="uploadedFiles.length > 0" class="uploaded-files">
+        <div 
+          v-for="(file, index) in uploadedFiles" 
+          :key="index" 
+          class="uploaded-file"
+        >
+          <div class="file-icon-wrapper">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+            </svg>
+          </div>
+          <div class="file-info">
+            <span class="file-name">{{ file.filename }}</span>
+            <span class="file-size">{{ formatSize(file.size) }}</span>
+          </div>
+          <button @click="removeFile(index)" class="remove-file-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+      
+      <div class="input-row">
+        <div class="input-field">
+          <textarea
+            ref="textareaRef"
+            v-model="message"
+            @keydown.enter.exact.prevent="send"
+            @input="autoResize"
+            placeholder="请输入你的需求，按「Enter」发送"
+            :disabled="disabled"
+            rows="1"
+          ></textarea>
+        </div>
+      </div>
+      
+      <div class="input-actions">
+        <div class="left-actions">
+          <label class="action-btn upload-btn" :class="{ disabled: isStreaming || disabled }">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+            </svg>
+            <input 
+              type="file" 
+              @change="handleFileSelect" 
+              multiple 
+              :disabled="isStreaming || disabled"
+              hidden
+            />
+          </label>
+        </div>
+        
+        <div class="right-actions">
+          <button 
+            v-if="!isStreaming"
+            @click="send" 
+            class="action-btn send-btn"
+            :class="{ active: canSend }"
+            :disabled="!canSend || disabled"
+            title="发送"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          </button>
+          <button 
+            v-else
+            @click="stop" 
+            class="action-btn stop-btn"
+            title="停止"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="6" width="12" height="12" rx="2"></rect>
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
-    <div class="chat-input-wrapper">
-      <label v-if="!isStreaming" class="upload-btn" :disabled="disabled">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-          <polyline points="17 8 12 3 7 8"></polyline>
-          <line x1="12" y1="3" x2="12" y2="15"></line>
-        </svg>
-        <input 
-          type="file" 
-          @change="handleFileSelect" 
-          multiple 
-          :disabled="disabled"
-          hidden
-        />
-      </label>
-      <textarea
-        ref="textareaRef"
-        v-model="message"
-        @keydown.enter.exact.prevent="send"
-        @input="autoResize"
-        placeholder="输入消息，按 Enter 发送，Shift+Enter 换行..."
-        :disabled="disabled"
-        rows="1"
-      ></textarea>
-      <button 
-        v-if="!isStreaming"
-        @click="send" 
-        class="send-btn"
-        :disabled="(!message.trim() && uploadedFiles.length === 0) || disabled"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="22" y1="2" x2="11" y2="13"></line>
-          <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-        </svg>
-      </button>
-      <button 
-        v-else
-        @click="stop" 
-        class="stop-btn"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-          <rect x="6" y="6" width="12" height="12" rx="2"></rect>
-        </svg>
-      </button>
+    
+    <div class="input-footer">
+      <span class="footer-text">CQ-Agent 可能会犯错，请核查重要信息</span>
     </div>
-    <div class="input-hint">AI 助手可以帮你完成各种任务</div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 
 const props = defineProps({
   disabled: {
@@ -88,6 +115,16 @@ const textareaRef = ref(null)
 const uploadedFiles = ref([])
 let abortController = null
 
+const canSend = computed(() => {
+  return message.value.trim() || uploadedFiles.value.length > 0
+})
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
 async function handleFileSelect(event) {
   const files = Array.from(event.target.files)
   
@@ -107,24 +144,21 @@ function removeFile(index) {
 }
 
 async function send() {
-  const hasContent = message.value.trim()
-  const hasFiles = uploadedFiles.value.length > 0
+  if (!canSend.value || props.disabled) return
   
-  if ((hasContent || hasFiles) && !props.disabled) {
-    abortController = new AbortController()
-    
-    const filesToSend = uploadedFiles.value.map(f => ({
-      filename: f.filename,
-      size: f.size,
-      file: f.file
-    }))
-    
-    emit('send', message.value.trim(), filesToSend, abortController.signal)
-    
-    message.value = ''
-    uploadedFiles.value = []
-    nextTick(() => autoResize())
-  }
+  abortController = new AbortController()
+  
+  const filesToSend = uploadedFiles.value.map(f => ({
+    filename: f.filename,
+    size: f.size,
+    file: f.file
+  }))
+  
+  emit('send', message.value.trim(), filesToSend, abortController.signal)
+  
+  message.value = ''
+  uploadedFiles.value = []
+  nextTick(() => autoResize())
 }
 
 function stop() {
@@ -138,7 +172,7 @@ function stop() {
 function autoResize() {
   if (textareaRef.value) {
     textareaRef.value.style.height = 'auto'
-    textareaRef.value.style.height = Math.min(textareaRef.value.scrollHeight, 200) + 'px'
+    textareaRef.value.style.height = Math.min(textareaRef.value.scrollHeight, 150) + 'px'
   }
 }
 
@@ -157,84 +191,94 @@ onUnmounted(() => {
 
 <style scoped>
 .chat-input-container {
-  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 24px 24px;
+  background: linear-gradient(to top, #ffffff 0%, #f8fafc 100%);
+}
+
+.input-box {
+  width: 80%;
+  max-width: 900px;
   background: #ffffff;
-  border-top: 1px solid #e2e8f0;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.input-box:focus-within {
+  border-color: #0ea5e9;
+  box-shadow: 0 2px 12px rgba(14, 165, 233, 0.15);
 }
 
 .uploaded-files {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 12px;
+  padding: 10px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #f1f5f9;
 }
 
 .uploaded-file {
   display: flex;
   align-items: center;
-  gap: 6px;
-  background: #f1f5f9;
-  padding: 6px 10px;
-  border-radius: 8px;
-  font-size: 12px;
-  color: #475569;
+  gap: 10px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  padding: 8px 12px;
+  border-radius: 12px;
+  max-width: 200px;
 }
 
-.file-icon {
+.file-icon-wrapper {
+  width: 32px;
+  height: 32px;
+  background: #f1f5f9;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.file-icon-wrapper svg {
   width: 16px;
   height: 16px;
   color: #64748b;
 }
 
+.file-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .file-name {
-  max-width: 120px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #1e293b;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.remove-file-btn {
-  width: 18px;
-  height: 18px;
-  border: none;
-  background: #e2e8f0;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  font-size: 14px;
+.file-size {
+  font-size: 11px;
   color: #64748b;
-  transition: all 0.2s;
 }
 
-.remove-file-btn:hover {
-  background: #cbd5e1;
-  color: #ef4444;
-}
-
-.chat-input-wrapper {
-  display: flex;
-  align-items: flex-end;
-  gap: 12px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  padding: 8px 12px;
-  transition: all 0.2s;
-}
-
-.chat-input-wrapper:focus-within {
-  border-color: #0ea5e9;
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
-}
-
-.upload-btn {
-  width: 36px;
-  height: 36px;
+.remove-file-btn {
+  width: 24px;
+  height: 24px;
   border: none;
-  background: #f1f5f9;
-  border-radius: 10px;
+  background: transparent;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -243,67 +287,133 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.upload-btn:hover:not([disabled]) {
-  background: #e2e8f0;
+.remove-file-btn:hover {
+  background: rgba(14, 165, 233, 0.1);
 }
 
-.upload-btn[disabled] {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.upload-btn svg {
-  width: 20px;
-  height: 20px;
+.remove-file-btn svg {
+  width: 16px;
+  height: 16px;
   color: #64748b;
 }
 
-.chat-input-wrapper textarea {
-  flex: 1;
+.remove-file-btn:hover svg {
+  color: #ef4444;
+}
+
+.input-row {
+  padding: 12px 16px;
+  background: transparent;
+}
+
+.input-field {
+  width: 100%;
+}
+
+.input-field textarea {
+  width: 100%;
   border: none;
   background: transparent;
   resize: none;
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 15px;
+  line-height: 1.6;
   color: #1e293b;
-  max-height: 200px;
+  max-height: 150px;
   min-height: 24px;
-  padding: 6px 0;
+  padding: 0;
   outline: none;
 }
 
-.chat-input-wrapper textarea::placeholder {
+.input-field textarea::placeholder {
   color: #94a3b8;
+  font-size: 14px;
+}
+
+.input-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px 12px;
+  border-top: none;
+  background: #fefefe;
+}
+
+.left-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.right-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.action-btn svg {
+  width: 18px;
+  height: 18px;
+  color: #64748b;
+}
+
+.action-btn:hover {
+  background: #f1f5f9;
+}
+
+.action-btn:hover svg {
+  color: #0ea5e9;
 }
 
 .send-btn {
   width: 36px;
   height: 36px;
   border: none;
-  background: #0ea5e9;
-  border-radius: 10px;
+  background: #f1f5f9;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s;
-  flex-shrink: 0;
-}
-
-.send-btn:hover:not(:disabled) {
-  background: #0284c7;
-  transform: scale(1.05);
-}
-
-.send-btn:disabled {
-  background: #cbd5e1;
-  cursor: not-allowed;
+  transition: all 0.2s ease;
 }
 
 .send-btn svg {
   width: 18px;
   height: 18px;
+  color: #64748b;
+  transition: all 0.2s;
+}
+
+.send-btn.active {
+  background: #0ea5e9;
+}
+
+.send-btn.active svg {
   color: white;
+}
+
+.send-btn.active:hover:not(:disabled) {
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(14, 165, 233, 0.3);
+}
+
+.send-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .stop-btn {
@@ -311,18 +421,12 @@ onUnmounted(() => {
   height: 36px;
   border: none;
   background: #ef4444;
-  border-radius: 10px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s;
-  flex-shrink: 0;
-}
-
-.stop-btn:hover {
-  background: #dc2626;
-  transform: scale(1.05);
+  transition: all 0.2s ease;
 }
 
 .stop-btn svg {
@@ -331,10 +435,51 @@ onUnmounted(() => {
   color: white;
 }
 
-.input-hint {
+.stop-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+}
+
+.upload-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.upload-btn svg {
+  width: 18px;
+  height: 18px;
+  color: #64748b;
+  transition: all 0.2s;
+}
+
+.upload-btn:hover:not(.disabled) {
+  background: #f1f5f9;
+}
+
+.upload-btn:hover:not(.disabled) svg {
+  color: #0ea5e9;
+}
+
+.upload-btn.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.input-footer {
+  margin-top: 12px;
   text-align: center;
+}
+
+.footer-text {
   font-size: 12px;
   color: #94a3b8;
-  margin-top: 8px;
 }
 </style>
