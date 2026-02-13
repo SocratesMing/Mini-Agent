@@ -218,11 +218,27 @@ async def chat_stream_generator(
     assistant_started = False
     tool_calls_count = 0
     
+    content_blocks = []
+    block_order = 0
+    current_content = ""
+    
+    def add_content_block():
+        nonlocal current_content, block_order
+        if current_content:
+            content_blocks.append({
+                "type": "content",
+                "content": current_content,
+                "order": block_order,
+            })
+            block_order += 1
+            current_content = ""
+    
     try:
         yield f"data: {json.dumps({'type': 'start', 'session_id': session_id, 'message_id': message_id}, ensure_ascii=False)}\n\n"
         
-        async for event in agent.run_stream(request.message):
+        async for event in agent.run_stream(request.message, enable_deep_think=request.enable_deep_think):
             event_type = event.get("type", "unknown")
+            logger.info(f"收到事件: {event_type}, 内容: {str(event)[:100]}...")
             
             if event_type == "thinking_start":
                 thinking_started = True
@@ -239,21 +255,66 @@ async def chat_stream_generator(
             elif event_type == "content":
                 content = event.get("content", "")
                 full_response += content
+                current_content += content
                 stream_logger.log_content_chunk(content, False)
                 yield f"data: {json.dumps({'type': 'content', 'content': content}, ensure_ascii=False)}\n\n"
             elif event_type == "tool_call":
+                add_content_block()
                 tool_name = event.get("tool_name", "")
                 arguments = event.get("arguments", {})
+                tool_call_id = event.get("tool_call_id", "")
+                logger.info(f"收到 tool_call 事件: tool_name={tool_name}, tool_call_id={tool_call_id}, arguments={arguments}")
                 tool_calls_count += 1
                 stream_logger.log_tool_call(tool_name, arguments)
-                yield f"data: {json.dumps({'type': 'tool_call', 'tool_name': tool_name, 'arguments': arguments}, ensure_ascii=False)}\n\n"
+                logger.info(f"保存工具调用记录: session_id={session_id}, message_id={message_id}")
+                db.add_tool_call_record(
+                    session_id=session_id,
+                    message_id=message_id,
+                    tool_name=tool_name,
+                    tool_call_id=tool_call_id,
+                    arguments=arguments,
+                    result=None,
+                    success=True
+                )
+                logger.info(f"工具调用记录保存完成: tool_name={tool_name}")
+                content_blocks.append({
+                    "type": "tool_call",
+                    "tool_name": tool_name,
+                    "arguments": arguments,
+                    "tool_call_id": tool_call_id,
+                    "order": block_order,
+                })
+                block_order += 1
+                yield f"data: {json.dumps({'type': 'tool_call', 'tool_name': tool_name, 'arguments': arguments, 'tool_call_id': tool_call_id}, ensure_ascii=False)}\n\n"
             elif event_type == "tool_result":
                 tool_name = event.get("tool_name", "")
                 success = event.get("success", False)
                 result = event.get("result", "")
+                tool_call_id = event.get("tool_call_id", "")
+                logger.info(f"收到 tool_result 事件: tool_name={tool_name}, tool_call_id={tool_call_id}, success={success}, result={str(result)[:100]}...")
                 stream_logger.log_tool_result(tool_name, success, result)
-                yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': tool_name, 'success': success, 'result': result}, ensure_ascii=False)}\n\n"
+                if tool_call_id:
+                    logger.info(f"更新工具调用结果: session_id={session_id}, message_id={message_id}, tool_call_id={tool_call_id}")
+                    db.update_tool_call_result(
+                        session_id=session_id,
+                        message_id=message_id,
+                        tool_call_id=tool_call_id,
+                        result=result,
+                        success=success
+                    )
+                    logger.info(f"工具调用结果更新完成: tool_name={tool_name}")
+                content_blocks.append({
+                    "type": "tool_result",
+                    "tool_name": tool_name,
+                    "result": result,
+                    "success": success,
+                    "tool_call_id": tool_call_id,
+                    "order": block_order,
+                })
+                block_order += 1
+                yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': tool_name, 'success': success, 'result': result, 'tool_call_id': tool_call_id}, ensure_ascii=False)}\n\n"
             elif event_type == "done":
+                add_content_block()
                 thinking_content = event.get("thinking", None)
                 steps = event.get("steps", 1)
                 tool_calls = event.get("tool_calls", 0)
@@ -270,11 +331,20 @@ async def chat_stream_generator(
         yield f"data: {json.dumps({'type': 'error', 'content': error_msg}, ensure_ascii=False)}\n\n"
         return
     
+    if thinking_content:
+        thinking_block = {
+            "type": "thinking",
+            "content": thinking_content,
+            "order": -1,
+        }
+        content_blocks.insert(0, thinking_block)
+    
     assistant_message = {
         "role": "assistant",
         "content": full_response,
         "timestamp": datetime.now().isoformat(),
         "thinking": thinking_content,
+        "blocks": content_blocks,
     }
     db.add_message(session_id, assistant_message)
 
@@ -493,7 +563,7 @@ async def chat(
     thinking_content = None
     
     try:
-        async for chunk in agent.run_stream(request.message):
+        async for chunk in agent.run_stream(request.message, enable_deep_think=request.enable_deep_think):
             if "[THINKING]" in chunk and "[/THINKING]" in chunk:
                 thinking_text = chunk.replace("[THINKING]", "").replace("[/THINKING]", "")
                 stream_logger.log_thinking(thinking_text)

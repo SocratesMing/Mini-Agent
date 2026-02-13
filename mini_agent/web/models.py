@@ -75,6 +75,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., description="用户消息内容", min_length=1)
     session_id: Optional[str] = Field(default=None, description="会话ID，不提供则创建新会话")
     message_id: Optional[str] = Field(default=None, description="消息ID，用于追踪单条消息（可选）")
+    enable_deep_think: bool = Field(default=False, description="是否启用深度思考模式")
 
 
 class ChatResponse(BaseModel):

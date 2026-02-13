@@ -251,13 +251,16 @@ Requirements:
             print(f"{Colors.BRIGHT_RED}✗ Summary generation failed for round {round_num}: {e}{Colors.RESET}")
             return summary_content
 
-    async def run(self, cancel_event: Optional[asyncio.Event] = None) -> str:
+    async def run(self, user_message: str = "", cancel_event: Optional[asyncio.Event] = None, enable_deep_think: bool = False) -> str:
         """Execute agent loop until task is complete or max steps reached."""
         if cancel_event is not None:
             self.cancel_event = cancel_event
 
         self.logger.start_new_run()
         print(f"{Colors.DIM}📝 Log file: {self.logger.get_log_file_path()}{Colors.RESET}")
+
+        if user_message:
+            self.add_user_message(user_message)
 
         step = 0
         run_start_time = perf_counter()
@@ -420,8 +423,14 @@ Requirements:
         self,
         user_message: str,
         cancel_event: Optional[asyncio.Event] = None,
+        enable_deep_think: bool = False,
     ) -> AsyncGenerator[dict, None]:
         """Execute agent loop with structured streaming output.
+
+        Args:
+            user_message: The user's message
+            cancel_event: Optional event to signal cancellation
+            enable_deep_think: Whether to enable deep thinking mode
 
         Yields:
             dict: Event dictionaries with types:
@@ -435,7 +444,12 @@ Requirements:
             self.cancel_event = cancel_event
 
         self.logger.start_new_run()
-        print(f"{Colors.DIM}📝 Log file: {self.logger.get_log_file_path()}{Colors.RESET}")
+        
+        if enable_deep_think:
+            print(f"{Colors.BRIGHT_MAGENTA}🔮 Deep Think Mode Enabled{Colors.RESET}")
+            print(f"{Colors.DIM}📝 Log file: {self.logger.get_log_file_path()}{Colors.RESET}")
+        else:
+            print(f"{Colors.DIM}📝 Log file: {self.logger.get_log_file_path()}{Colors.RESET}")
 
         self.add_user_message(user_message)
 
@@ -471,6 +485,7 @@ Requirements:
 
             try:
                 async for chunk in self.llm.stream_generate(messages=self.messages, tools=tool_list):
+                    print(f"收到 chunk: {chunk}")
                     if "[THINKING]" in chunk and "[/THINKING]" in chunk:
                         thinking_text = chunk.replace("[THINKING]", "").replace("[/THINKING]", "")
                         if not thinking_started:
@@ -595,6 +610,7 @@ Requirements:
                         "tool_name": function_name,
                         "success": result.success,
                         "result": result.content if result.success else result.error,
+                        "tool_call_id": tool_call_id,
                     }
 
                     if result.success:

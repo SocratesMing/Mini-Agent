@@ -50,6 +50,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['sendMessage', 'stop'])
+const messagesRef = ref(null)
 
 function handleSend(message, files, signal) {
   emit('sendMessage', message, files, signal)
@@ -59,13 +60,21 @@ function handleStop() {
   emit('stop')
 }
 
-watch(() => props.messages.length, () => {
+function scrollToBottom() {
   nextTick(() => {
     if (messagesRef.value) {
       messagesRef.value.scrollTop = messagesRef.value.scrollHeight
     }
   })
-})
+}
+
+watch(() => props.messages.length, scrollToBottom)
+
+watch(() => props.messages, () => {
+  if (props.isStreaming) {
+    scrollToBottom()
+  }
+}, { deep: true })
 </script>
 
 <style scoped>
@@ -84,12 +93,6 @@ watch(() => props.messages.length, () => {
   scroll-behavior: smooth;
   display: flex;
   flex-direction: column;
-  align-items: center;
-}
-
-.chat-messages > * {
-  width: 80%;
-  max-width: 900px;
 }
 
 .welcome-screen {

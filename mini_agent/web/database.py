@@ -128,6 +128,23 @@ class Database:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_updated_at ON sessions(updated_at)
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS tool_call_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    message_id TEXT NOT NULL,
+                    tool_name TEXT NOT NULL,
+                    tool_call_id TEXT NOT NULL,
+                    arguments TEXT NOT NULL,
+                    result TEXT,
+                    success INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_tool_call_session ON tool_call_records(session_id)
+            """)
             conn.commit()
     
     def create_session(self, session_data: SessionModel) -> SessionModel:
@@ -300,6 +317,138 @@ class Database:
             cursor.execute("SELECT COUNT(*) FROM sessions")
             return cursor.fetchone()[0]
 
+    def add_tool_call_record(
+        self,
+        session_id: str,
+        message_id: str,
+        tool_name: str,
+        tool_call_id: str,
+        arguments: dict[str, Any],
+        result: Optional[str] = None,
+        success: bool = True
+    ) -> int:
+        """保存工具调用记录.
+
+        Args:
+            session_id: 会话ID
+            message_id: 消息ID
+            tool_name: 工具名称
+            tool_call_id: 工具调用ID
+            arguments: 工具参数
+            result: 工具执行结果
+            success: 是否执行成功
+
+        Returns:
+            记录ID
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO tool_call_records 
+                (session_id, message_id, tool_name, tool_call_id, arguments, result, success, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    message_id,
+                    tool_name,
+                    tool_call_id,
+                    json.dumps(arguments, ensure_ascii=False),
+                    result,
+                    1 if success else 0,
+                    datetime.now().isoformat(),
+                )
+            )
+            return cursor.lastrowid
+
+    def get_tool_call_records(
+        self,
+        session_id: str,
+        message_id: Optional[str] = None
+    ) -> list[dict[str, Any]]:
+        """获取工具调用记录列表.
+
+        Args:
+            session_id: 会话ID
+            message_id: 消息ID（可选）
+
+        Returns:
+            工具调用记录列表
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if message_id:
+                cursor.execute(
+                    """
+                    SELECT id, session_id, message_id, tool_name, tool_call_id, 
+                           arguments, result, success, created_at
+                    FROM tool_call_records 
+                    WHERE session_id = ? AND message_id = ?
+                    ORDER BY id ASC
+                    """,
+                    (session_id, message_id)
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT id, session_id, message_id, tool_name, tool_call_id, 
+                           arguments, result, success, created_at
+                    FROM tool_call_records 
+                    WHERE session_id = ?
+                    ORDER BY id ASC
+                    """,
+                    (session_id,)
+                )
+            
+            rows = cursor.fetchall()
+            records = []
+            for row in rows:
+                records.append({
+                    "id": row["id"],
+                    "session_id": row["session_id"],
+                    "message_id": row["message_id"],
+                    "tool_name": row["tool_name"],
+                    "tool_call_id": row["tool_call_id"],
+                    "arguments": json.loads(row["arguments"]) if row["arguments"] else {},
+                    "result": row["result"],
+                    "success": bool(row["success"]),
+                    "created_at": row["created_at"],
+                })
+            return records
+
+    def update_tool_call_result(
+        self,
+        session_id: str,
+        message_id: str,
+        tool_call_id: str,
+        result: str,
+        success: bool = True
+    ) -> bool:
+        """更新工具调用结果.
+
+        Args:
+            session_id: 会话ID
+            message_id: 消息ID
+            tool_call_id: 工具调用ID
+            result: 工具执行结果
+            success: 是否执行成功
+
+        Returns:
+            是否更新成功
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE tool_call_records 
+                SET result = ?, success = ?
+                WHERE session_id = ? AND message_id = ? AND tool_call_id = ?
+                """,
+                (result, 1 if success else 0, session_id, message_id, tool_call_id)
+            )
+            return cursor.rowcount > 0
+
 
 _db_instance: Optional[Database] = None
 
@@ -313,6 +462,7 @@ def get_database() -> Database:
     global _db_instance
     if _db_instance is None:
         _db_instance = Database()
+        _db_instance.init_tables()
     return _db_instance
 
 

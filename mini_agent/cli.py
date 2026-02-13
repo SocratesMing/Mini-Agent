@@ -713,9 +713,7 @@ async def run_agent(workspace_dir: Path, stream: bool = False):
             print(
                 f"\n{Colors.BRIGHT_BLUE}Agent{Colors.RESET} {Colors.DIM}›{Colors.RESET} {Colors.DIM}Thinking... (Esc to cancel){Colors.RESET}\n"
             )
-            # 智能体添加消息
-            agent.add_user_message(user_input)
-
+  
             # Create cancellation event
             cancel_event = asyncio.Event()
             agent.cancel_event = cancel_event
@@ -776,18 +774,39 @@ async def run_agent(workspace_dir: Path, stream: bool = False):
             try:
                 # 调用智能体 - 选择流式或非流式
                 if stream:
-                    agent_task = asyncio.create_task(agent.run_stream(cancel_event=cancel_event))
+                    async for event in agent.run_stream(user_input, cancel_event=cancel_event):
+                        event_type = event.get("type", "")
+                        if event_type == "thinking_start":
+                            print(f"\n{Colors.BOLD}{Colors.MAGENTA}🧠 Thinking:{Colors.RESET}")
+                            print(f"{Colors.DIM}", end="", flush=True)
+                        elif event_type == "thinking":
+                            print(event.get("content", ""), end="", flush=True)
+                        elif event_type == "assistant_start":
+                            print(f"\n{Colors.BOLD}{Colors.BRIGHT_BLUE}🤖 Assistant:{Colors.RESET}")
+                            print(f"{Colors.CYAN}", end="", flush=True)
+                        elif event_type == "content":
+                            print(event.get("content", ""), end="", flush=True)
+                        elif event_type == "tool_call":
+                            tool_name = event.get("tool_name", "")
+                            print(f"\n{Colors.BRIGHT_GREEN}🔧 Tool: {tool_name}{Colors.RESET}")
+                        elif event_type == "tool_result":
+                            tool_name = event.get("tool_name", "")
+                            success = event.get("success", False)
+                            status = "✓" if success else "✗"
+                            print(f"{Colors.BRIGHT_GREEN}{status} Tool result: {tool_name}{Colors.RESET}")
+                        elif event_type == "done":
+                            print(f"\n{Colors.RESET}")
+                            print(f"{Colors.DIM}✅ Task completed in {event.get('steps', 1)} steps{Colors.RESET}")
+                        
+                        if esc_cancelled[0]:
+                            cancel_event.set()
                 else:
-                    agent_task = asyncio.create_task(agent.run(cancel_event=cancel_event))
-
-                # Poll for cancellation while agent runs
-                while not agent_task.done():
-                    if esc_cancelled[0]:
-                        cancel_event.set()
-                    await asyncio.sleep(0.1)
-
-                # Get result
-                _ = agent_task.result()
+                    agent_task = asyncio.create_task(agent.run(user_input, cancel_event=cancel_event))
+                    while not agent_task.done():
+                        if esc_cancelled[0]:
+                            cancel_event.set()
+                        await asyncio.sleep(0.1)
+                    _ = agent_task.result()
 
             except asyncio.CancelledError:
                 print(f"\n{Colors.BRIGHT_YELLOW}⚠️  Agent execution cancelled{Colors.RESET}")

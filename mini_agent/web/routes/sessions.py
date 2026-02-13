@@ -7,7 +7,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
@@ -270,3 +270,19 @@ async def get_all_files():
     
     logger.info(f"获取所有文件 | 总数: {len(all_files)}")
     return {"files": all_files}
+
+
+@router.get(
+    "/sessions/{session_id}/tool-calls",
+    summary="获取工具调用记录",
+    description="获取指定会话的工具调用历史记录。"
+)
+async def get_session_tool_calls(
+    session_id: str,
+    message_id: Optional[str] = None
+):
+    """获取指定会话的工具调用记录."""
+    db = get_database()
+    records = db.get_tool_call_records(session_id, message_id)
+    logger.info(f"获取工具调用记录 | 会话ID: {session_id} | 消息ID: {message_id} | 记录数: {len(records)}")
+    return {"tool_calls": records}

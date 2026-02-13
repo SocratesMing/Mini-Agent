@@ -17,6 +17,7 @@ class RetryConfig(BaseModel):
     initial_delay: float = 1.0
     max_delay: float = 60.0
     exponential_base: float = 2.0
+    retryable_exceptions: tuple = (Exception,)
 
 
 class LLMConfig(BaseModel):

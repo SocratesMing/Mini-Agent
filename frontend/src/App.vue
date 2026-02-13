@@ -78,26 +78,24 @@ async function loadSessions() {
 
 async function ensureCurrentSession(initialTitle = '') {
   if (!currentSessionId.value) {
-    const newSession = await createSession('')
+    const newSession = await createSession(initialTitle || '新会话')
     currentSessionId.value = newSession.session_id
-    sessions.value.unshift({
-      session_id: newSession.session_id,
-      title: initialTitle || '新会话',
-      created_at: new Date().toISOString()
-    })
+    const existingIndex = sessions.value.findIndex(s => s.session_id === newSession.session_id)
+    if (existingIndex === -1) {
+      sessions.value.unshift({
+        session_id: newSession.session_id,
+        title: newSession.title || initialTitle || '新会话',
+        created_at: newSession.created_at || new Date().toISOString()
+      })
+    }
   }
   return currentSessionId.value
 }
 
 async function handleCreateSession() {
   showAssets.value = false
-  try {
-    await ensureCurrentSession()
-    messages.value = []
-  } catch (e) {
-    console.error('创建会话失败:', e)
-    error.value = '创建会话失败'
-  }
+  currentSessionId.value = null
+  messages.value = []
 }
 
 async function handleSelectSession(sessionId) {
@@ -144,14 +142,9 @@ async function handleRenameSession(sessionId, newTitle) {
   }
 }
 
-async function handleSendMessage(message, files = [], signal) {
-  try {
-    const title = message.substring(0, 5) || '新会话'
-    await ensureCurrentSession(title)
-  } catch (e) {
-    console.error('创建会话失败:', e)
-    error.value = '创建会话失败'
-    return
+async function handleSendMessage(message, files = [], signal, enableDeepThink = false) {
+  if (!currentSessionId.value) {
+    currentSessionId.value = null
   }
 
   const userMsgId = `user-${Date.now()}`
@@ -160,7 +153,9 @@ async function handleSendMessage(message, files = [], signal) {
   if (files && files.length > 0) {
     for (const f of files) {
       try {
-        await uploadFile(currentSessionId.value, f.file)
+        if (currentSessionId.value) {
+          await uploadFile(currentSessionId.value, f.file)
+        }
         contentWithFiles += `\n[文件已上传: ${f.filename}]`
       } catch (e) {
         console.error('文件上传失败:', e)
@@ -184,13 +179,37 @@ async function handleSendMessage(message, files = [], signal) {
     role: 'assistant',
     content: '',
     created_at: null,
-    thinking: ''
+    thinking: '',
+    tool_calls: [],
+    blocks: []
   }
 
   messages.value.push(assistantMessage)
 
-  let currentContent = ''
   let currentThinking = ''
+  let currentContent = ''
+  let currentToolCalls = []
+  let currentBlock = null
+
+  function addBlock(type, data) {
+    if (!currentBlock || currentBlock.type !== type) {
+      currentBlock = { type, content: '', ...data }
+      const idx = messages.value.findIndex(m => m.id === assistantMsgId)
+      if (idx !== -1) {
+        messages.value[idx].blocks.push(currentBlock)
+      }
+    } else {
+      currentBlock.content = (currentBlock.content || '') + (data.content || '')
+      if (data.tool_name) currentBlock.tool_name = data.tool_name
+      if (data.arguments) currentBlock.arguments = data.arguments
+      if (data.result !== undefined) currentBlock.result = data.result
+      if (data.success !== undefined) currentBlock.success = data.success
+    }
+    const idx = messages.value.findIndex(m => m.id === assistantMsgId)
+    if (idx !== -1) {
+      messages.value[idx] = { ...messages.value[idx] }
+    }
+  }
 
   isStreaming.value = true
 
@@ -198,17 +217,66 @@ async function handleSendMessage(message, files = [], signal) {
     await sendMessage(currentSessionId.value, message, (data) => {
       const eventType = data.type || ''
 
-      if (eventType === 'thinking') {
+      if (eventType === 'error') {
+        error.value = data.content || '发送消息失败'
+      } else if (eventType === 'start') {
+        if (data.session_id) {
+          currentSessionId.value = data.session_id
+          const existingIdx = sessions.value.findIndex(s => s.session_id === data.session_id)
+          if (existingIdx === -1) {
+            sessions.value.unshift({
+              session_id: data.session_id,
+              title: message.substring(0, 5) + '...' || '新会话',
+              created_at: new Date().toISOString()
+            })
+          }
+        }
+      } else if (eventType === 'thinking') {
         currentThinking += data.content || ''
+        addBlock('thinking', { content: data.content || '' })
         const idx = messages.value.findIndex(m => m.id === assistantMsgId)
         if (idx !== -1) {
           messages.value[idx] = { ...messages.value[idx], thinking: currentThinking }
         }
       } else if (eventType === 'content') {
         currentContent += data.content || ''
+        addBlock('content', { content: data.content || '' })
         const idx = messages.value.findIndex(m => m.id === assistantMsgId)
         if (idx !== -1) {
           messages.value[idx] = { ...messages.value[idx], content: currentContent }
+        }
+      } else if (eventType === 'tool_call') {
+        const toolCall = {
+          tool_name: data.tool_name || '',
+          arguments: data.arguments || {},
+          result: '',
+          success: true
+        }
+        currentToolCalls.push(toolCall)
+        addBlock('tool_call', { 
+          tool_name: data.tool_name || '', 
+          arguments: data.arguments || {},
+          content: ''
+        })
+        const idx = messages.value.findIndex(m => m.id === assistantMsgId)
+        if (idx !== -1) {
+          messages.value[idx] = { ...messages.value[idx], tool_calls: [...currentToolCalls] }
+        }
+      } else if (eventType === 'tool_result') {
+        if (currentToolCalls.length > 0) {
+          const lastTool = currentToolCalls[currentToolCalls.length - 1]
+          lastTool.result = data.result || ''
+          lastTool.success = data.success !== false
+          addBlock('tool_result', { 
+            tool_name: data.tool_name || '',
+            result: data.result || '',
+            success: data.success !== false,
+            content: data.result || ''
+          })
+          const idx = messages.value.findIndex(m => m.id === assistantMsgId)
+          if (idx !== -1) {
+            messages.value[idx] = { ...messages.value[idx], tool_calls: [...currentToolCalls] }
+          }
         }
       } else if (eventType === 'done') {
         const finalContent = data.content || currentContent
@@ -220,8 +288,19 @@ async function handleSendMessage(message, files = [], signal) {
             created_at: new Date().toISOString()
           }
         }
+        if (data.session_id) {
+          currentSessionId.value = data.session_id
+          const existingIdx = sessions.value.findIndex(s => s.session_id === data.session_id)
+          if (existingIdx === -1) {
+            sessions.value.unshift({
+              session_id: data.session_id,
+              title: message.substring(0, 5) + '...' || '新会话',
+              created_at: new Date().toISOString()
+            })
+          }
+        }
       }
-    }, signal)
+    }, signal, enableDeepThink)
   } catch (e) {
     if (e.name === 'AbortError') {
       return

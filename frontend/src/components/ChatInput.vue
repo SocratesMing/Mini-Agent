@@ -54,6 +54,22 @@
               hidden
             />
           </label>
+          
+          <span class="divider">|</span>
+          
+          <button 
+            class="deep-think-btn" 
+            :class="{ active: enableDeepThink, disabled: isStreaming || disabled }"
+            :disabled="isStreaming || disabled"
+            @click="enableDeepThink = !enableDeepThink"
+            title="深度思考"
+          >
+            <svg class="deep-think-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M12 15a3 3 0 100-6 3 3 0 000 6z"></path>
+              <path fill-rule="evenodd" d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" clip-rule="evenodd"></path>
+            </svg>
+            <span class="deep-think-label">深度思考</span>
+          </button>
         </div>
         
         <div class="right-actions">
@@ -113,6 +129,7 @@ const emit = defineEmits(['send', 'stop'])
 const message = ref('')
 const textareaRef = ref(null)
 const uploadedFiles = ref([])
+const enableDeepThink = ref(false)
 let abortController = null
 
 const canSend = computed(() => {
@@ -154,7 +171,7 @@ async function send() {
     file: f.file
   }))
   
-  emit('send', message.value.trim(), filesToSend, abortController.signal)
+  emit('send', message.value.trim(), filesToSend, abortController.signal, enableDeepThink.value)
   
   message.value = ''
   uploadedFiles.value = []
@@ -341,7 +358,81 @@ onUnmounted(() => {
 .left-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+}
+
+.divider {
+  color: #e2e8f0;
+  font-size: 14px;
+  user-select: none;
+}
+
+.deep-think-btn {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  height: auto;
+  min-height: 32px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.deep-think-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.deep-think-btn svg {
+  width: 16px;
+  height: 16px;
+  color: #64748b;
+}
+
+.deep-think-btn:hover:not(.disabled) svg {
+  color: #0ea5e9;
+}
+
+.deep-think-btn.active svg {
+  color: white;
+}
+
+.deep-think-label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.deep-think-btn:hover:not(.disabled) {
+  background: rgba(14, 165, 233, 0.1);
+  border-color: transparent;
+}
+
+.deep-think-btn:hover:not(.disabled) svg,
+.deep-think-btn:hover:not(.disabled) .deep-think-label {
+  color: #0ea5e9;
+}
+
+.deep-think-btn.active {
+  background: #0ea5e9;
+  border-color: #0ea5e9;
+  border-radius: 6px;
+}
+
+.deep-think-btn.active svg,
+.deep-think-btn.active .deep-think-label {
+  color: white;
+}
+
+.deep-think-btn.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .right-actions {
@@ -469,6 +560,39 @@ onUnmounted(() => {
 }
 
 .upload-btn.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.copy-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.copy-btn svg {
+  width: 18px;
+  height: 18px;
+  color: #64748b;
+  transition: all 0.2s;
+}
+
+.copy-btn:hover:not(.disabled) {
+  background: #f1f5f9;
+}
+
+.copy-btn:hover:not(.disabled) svg {
+  color: #0ea5e9;
+}
+
+.copy-btn.disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
