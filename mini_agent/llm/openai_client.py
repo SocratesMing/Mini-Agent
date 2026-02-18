@@ -49,12 +49,14 @@ class OpenAIClient(LLMClientBase):
         self,
         api_messages: list[dict[str, Any]],
         tools: list[Any] | None = None,
+        enable_deep_think: bool = False,
     ) -> Any:
         """Execute API request (core method that can be retried).
 
         Args:
             api_messages: List of messages in OpenAI format
             tools: Optional list of tools
+            enable_deep_think: Whether to enable deep thinking mode
 
         Returns:
             OpenAI ChatCompletion response (full response including usage)
@@ -62,19 +64,66 @@ class OpenAIClient(LLMClientBase):
         Raises:
             Exception: API call failed
         """
+        logger.info("=" * 80)
+        logger.info("[LLM] 开始API请求")
+        logger.info("-" * 80)
+        logger.info(f"[LLM] 请求参数:")
+        logger.info(f"[LLM]   - model: {self.model}")
+        logger.info(f"[LLM]   - api_base: {self.client.base_url}")
+        logger.info(f"[LLM]   - enable_deep_think: {enable_deep_think}")
+        logger.info(f"[LLM]   - messages_count: {len(api_messages)}")
+        
+        for i, msg in enumerate(api_messages):
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                content_preview = content[:100] + "..." if len(content) > 100 else content
+            else:
+                content_preview = str(content)[:100] + "..."
+            logger.info(f"[LLM]   - message[{i}]: role={role}, content={content_preview}")
+        
+        if tools:
+            logger.info(f"[LLM]   - tools_count: {len(tools)}")
+            for i, tool in enumerate(tools):
+                if isinstance(tool, dict) and "function" in tool:
+                    tool_name = tool["function"].get("name", "unknown")
+                elif hasattr(tool, "name"):
+                    tool_name = tool.name
+                else:
+                    tool_name = "unknown"
+                logger.info(f"[LLM]     - tool[{i}]: {tool_name}")
+        
         params = {
             "model": self.model,
             "messages": api_messages,
-            # Enable reasoning_split to separate thinking content
-            "extra_body": {"reasoning_split": True},
         }
+
+        # MiniMax API: 使用reasoning_enabled参数控制思考内容
+        if enable_deep_think:
+            params["extra_body"] = {"reasoning_split": True}
+            logger.info(f"[LLM]   - extra_body: reasoning_split=True")
+        else:
+            # 禁用思考内容
+            params["extra_body"] = {"reasoning_enabled": False}
+            logger.info(f"[LLM]   - extra_body: reasoning_enabled=False")
 
         if tools:
             params["tools"] = self._convert_tools(tools)
 
-        # Use OpenAI SDK's chat.completions.create
+        logger.info(f"[LLM] 发送请求到API...")
         response = await self.client.chat.completions.create(**params)
-        # Return full response to access usage info
+        
+        logger.info(f"[LLM] 收到API响应")
+        if hasattr(response, 'usage') and response.usage:
+            logger.info(f"[LLM]   - usage: prompt_tokens={response.usage.prompt_tokens}, completion_tokens={response.usage.completion_tokens}, total_tokens={response.usage.total_tokens}")
+        if response.choices and len(response.choices) > 0:
+            msg = response.choices[0].message
+            content_preview = (msg.content or "")[:100] + "..." if msg.content and len(msg.content) > 100 else msg.content
+            logger.info(f"[LLM]   - content_preview: {content_preview}")
+            if msg.tool_calls:
+                logger.info(f"[LLM]   - tool_calls_count: {len(msg.tool_calls)}")
+        logger.info("-" * 80)
+        
         return response
 
     def _convert_tools(self, tools: list[Any]) -> list[dict[str, Any]]:
@@ -183,12 +232,14 @@ class OpenAIClient(LLMClientBase):
         self,
         messages: list[Message],
         tools: list[Any] | None = None,
+        enable_deep_think: bool = False,
     ) -> dict[str, Any]:
         """Prepare the request for OpenAI API.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of available tools
+            enable_deep_think: Whether to enable deep thinking mode
 
         Returns:
             Dictionary containing request parameters
@@ -198,13 +249,15 @@ class OpenAIClient(LLMClientBase):
         return {
             "api_messages": api_messages,
             "tools": tools,
+            "enable_deep_think": enable_deep_think,
         }
 
-    def _parse_response(self, response: Any) -> LLMResponse:
+    def _parse_response(self, response: Any, enable_deep_think: bool = False) -> LLMResponse:
         """Parse OpenAI response into LLMResponse.
 
         Args:
             response: OpenAI ChatCompletion response (full response object)
+            enable_deep_think: Whether deep thinking mode was enabled
 
         Returns:
             LLMResponse object
@@ -215,9 +268,9 @@ class OpenAIClient(LLMClientBase):
         # Extract text content
         text_content = message.content or ""
 
-        # Extract thinking content from reasoning_details
+        # Extract thinking content from reasoning_details (only if deep think is enabled)
         thinking_content = ""
-        if hasattr(message, "reasoning_details") and message.reasoning_details:
+        if enable_deep_think and hasattr(message, "reasoning_details") and message.reasoning_details:
             # reasoning_details is a list of reasoning blocks
             for detail in message.reasoning_details:
                 if hasattr(detail, "text"):
@@ -262,73 +315,128 @@ class OpenAIClient(LLMClientBase):
         self,
         messages: list[Message],
         tools: list[Any] | None = None,
+        enable_deep_think: bool = False,
     ) -> LLMResponse:
         """Generate response from OpenAI LLM.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of available tools
+            enable_deep_think: Whether to enable deep thinking mode
 
         Returns:
             LLMResponse containing the generated content
         """
-        # Prepare request
-        request_params = self._prepare_request(messages, tools)
+        request_params = self._prepare_request(messages, tools, enable_deep_think)
 
-        # Make API request with retry logic
         if self.retry_config.enabled:
-            # Apply retry logic
             retry_decorator = async_retry(config=self.retry_config, on_retry=self.retry_callback)
             api_call = retry_decorator(self._make_api_request)
             response = await api_call(
                 request_params["api_messages"],
                 request_params["tools"],
+                request_params["enable_deep_think"],
             )
         else:
-            # Don't use retry
             response = await self._make_api_request(
                 request_params["api_messages"],
                 request_params["tools"],
+                request_params["enable_deep_think"],
             )
 
-        # Parse and return response
-        return self._parse_response(response)
+        return self._parse_response(response, enable_deep_think=request_params["enable_deep_think"])
 
     async def stream_generate(
         self,
         messages: list[Message],
         tools: list[Any] | None = None,
+        enable_deep_think: bool = False,
     ) -> AsyncGenerator[str, None]:
         """Stream generate response from OpenAI LLM.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of Tool objects or dicts
+            enable_deep_think: Whether to enable deep thinking mode
 
         Yields:
             Text chunks as they are generated
         """
+        logger.info("=" * 80)
+        logger.info("[LLM_STREAM] 开始流式API请求")
+        logger.info("-" * 80)
+        
         _, api_messages = self._convert_messages(messages)
+        
+        logger.info(f"[LLM_STREAM] 请求参数:")
+        logger.info(f"[LLM_STREAM]   - model: {self.model}")
+        logger.info(f"[LLM_STREAM]   - api_base: {self.client.base_url}")
+        logger.info(f"[LLM_STREAM]   - enable_deep_think: {enable_deep_think}")
+        logger.info(f"[LLM_STREAM]   - messages_count: {len(api_messages)}")
+        
+        for i, msg in enumerate(api_messages):
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                content_preview = content[:100] + "..." if len(content) > 100 else content
+            else:
+                content_preview = str(content)[:100] + "..."
+            logger.info(f"[LLM_STREAM]   - message[{i}]: role={role}, content={content_preview}")
+        
+        if tools:
+            logger.info(f"[LLM_STREAM]   - tools_count: {len(tools)}")
+            for i, tool in enumerate(tools):
+                if isinstance(tool, dict) and "function" in tool:
+                    tool_name = tool["function"].get("name", "unknown")
+                elif hasattr(tool, "name"):
+                    tool_name = tool.name
+                else:
+                    tool_name = "unknown"
+                logger.info(f"[LLM_STREAM]     - tool[{i}]: {tool_name}")
 
         params = {
             "model": self.model,
             "messages": api_messages,
             "stream": True,
-            "extra_body": {"reasoning_split": True},
         }
+
+        # MiniMax API: 使用reasoning_enabled参数控制思考内容
+        if enable_deep_think:
+            params["extra_body"] = {"reasoning_split": True}
+            logger.info(f"[LLM_STREAM]   - extra_body: reasoning_split=True")
+        else:
+            # 禁用思考内容
+            params["extra_body"] = {"reasoning_enabled": False}
+            logger.info(f"[LLM_STREAM]   - extra_body: reasoning_enabled=False")
 
         if tools:
             params["tools"] = self._convert_tools(tools)
 
+        logger.info(f"[LLM_STREAM] 发送流式请求到API...")
         response_stream = await self.client.chat.completions.create(**params)
 
+        logger.info(f"[LLM_STREAM] 开始接收流式响应...")
+        chunk_count = 0
+        content_length = 0
+        thinking_length = 0
+        
         async for chunk in response_stream:
             if chunk.choices and len(chunk.choices) > 0:
                 delta = chunk.choices[0].delta
                 if delta:
                     if delta.content:
+                        chunk_count += 1
+                        content_length += len(delta.content)
                         yield delta.content
-                    if hasattr(delta, "reasoning_details") and delta.reasoning_details:
+                    # 只有启用深度思考时才处理思考内容
+                    if enable_deep_think and hasattr(delta, "reasoning_details") and delta.reasoning_details:
                         for detail in delta.reasoning_details:
                             if hasattr(detail, "text"):
+                                thinking_length += len(detail.text)
                                 yield f"[THINKING]{detail.text}[/THINKING]"
+        
+        logger.info(f"[LLM_STREAM] 流式响应完成")
+        logger.info(f"[LLM_STREAM]   - 总chunk数: {chunk_count}")
+        logger.info(f"[LLM_STREAM]   - 内容长度: {content_length}")
+        logger.info(f"[LLM_STREAM]   - 思考内容长度: {thinking_length}")
+        logger.info("-" * 80)

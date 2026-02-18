@@ -39,6 +39,17 @@
       {{ error }}
       <button @click="error = null">×</button>
     </div>
+
+    <!-- 返回上一页按钮 -->
+    <button 
+      class="go-back-btn"
+      @click="goBack"
+      title="返回上一页"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 19V5M5 12l7-7 7 7"/>
+      </svg>
+    </button>
   </div>
 </template>
 
@@ -173,18 +184,26 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
 
   messages.value.push(userMessage)
 
-  const assistantMsgId = `assistant-${Date.now()}`
-  const assistantMessage = {
-    id: assistantMsgId,
-    role: 'assistant',
-    content: '',
-    created_at: null,
-    thinking: '',
-    tool_calls: [],
-    blocks: []
-  }
+  let assistantMsgId = null
+  let assistantMessageCreated = false
 
-  messages.value.push(assistantMessage)
+  function ensureAssistantMessage() {
+    if (!assistantMessageCreated) {
+      assistantMsgId = `assistant-${Date.now()}`
+      const assistantMessage = {
+        id: assistantMsgId,
+        role: 'assistant',
+        content: '',
+        created_at: null,
+        thinking: '',
+        tool_calls: [],
+        blocks: [],
+        loading: true
+      }
+      messages.value.push(assistantMessage)
+      assistantMessageCreated = true
+    }
+  }
 
   let currentThinking = ''
   let currentContent = ''
@@ -192,6 +211,7 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
   let currentBlock = null
 
   function addBlock(type, data) {
+    ensureAssistantMessage()
     if (!currentBlock || currentBlock.type !== type) {
       currentBlock = { type, content: '', ...data }
       const idx = messages.value.findIndex(m => m.id === assistantMsgId)
@@ -280,12 +300,15 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
         }
       } else if (eventType === 'done') {
         const finalContent = data.content || currentContent
-        const idx = messages.value.findIndex(m => m.id === assistantMsgId)
-        if (idx !== -1) {
-          messages.value[idx] = {
-            ...messages.value[idx],
-            content: finalContent,
-            created_at: new Date().toISOString()
+        if (assistantMsgId) {
+          const idx = messages.value.findIndex(m => m.id === assistantMsgId)
+          if (idx !== -1) {
+            messages.value[idx] = {
+              ...messages.value[idx],
+              content: finalContent,
+              created_at: new Date().toISOString(),
+              loading: false
+            }
           }
         }
         if (data.session_id) {
@@ -306,7 +329,9 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
       return
     }
     console.error('发送消息失败:', e)
-    messages.value = messages.value.filter(m => m.id !== assistantMsgId)
+    if (assistantMsgId) {
+      messages.value = messages.value.filter(m => m.id !== assistantMsgId)
+    }
     error.value = e.message || '发送消息失败'
   } finally {
     isStreaming.value = false

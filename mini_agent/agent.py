@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+import logging
+import time
 from pathlib import Path
 from time import perf_counter
 from typing import AsyncGenerator, Optional
@@ -13,6 +15,8 @@ from .logger import AgentLogger
 from .schema import LLMResponse, Message
 from .tools.base import Tool, ToolResult
 from .utils import calculate_display_width
+
+logger = logging.getLogger("mini_agent.agent")
 
 
 # ANSI color codes
@@ -53,6 +57,7 @@ class Agent:
         max_steps: int = 50,
         workspace_dir: str = "./workspace",
         token_limit: int = 80000,
+        session_id: str = None,
     ):
         self.llm = llm_client
         self.tools = {tool.name: tool for tool in tools}
@@ -60,6 +65,7 @@ class Agent:
         self.token_limit = token_limit
         self.workspace_dir = Path(workspace_dir)
         self.cancel_event: Optional[asyncio.Event] = None
+        self.session_id = session_id or "-----"
 
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
 
@@ -289,7 +295,7 @@ Requirements:
             self.logger.log_request(messages=self.messages, tools=tool_list)
 
             try:
-                response = await self.llm.generate(messages=self.messages, tools=tool_list)
+                response = await self.llm.generate(messages=self.messages, tools=tool_list, enable_deep_think=enable_deep_think)
             except Exception as e:
                 from .retry import RetryExhaustedError
 
@@ -425,21 +431,13 @@ Requirements:
         cancel_event: Optional[asyncio.Event] = None,
         enable_deep_think: bool = False,
     ) -> AsyncGenerator[dict, None]:
-        """Execute agent loop with structured streaming output.
-
-        Args:
-            user_message: The user's message
-            cancel_event: Optional event to signal cancellation
-            enable_deep_think: Whether to enable deep thinking mode
-
-        Yields:
-            dict: Event dictionaries with types:
-                - thinking: thinking content chunks
-                - content: assistant response content chunks
-                - tool_call: tool call detected
-                - tool_result: tool execution result
-                - done: final completion with full response
-        """
+        """Execute agent loop with structured streaming output."""
+        start_time = time.time()
+        sid = self.session_id[-5:] if self.session_id else "-----"
+        
+        logger.info(f"[{sid}] 开始Agent执行")
+        logger.info(f"[{sid}] user_message: {user_message[:100]}{'...' if len(user_message) > 100 else ''} | enable_deep_think: {enable_deep_think} | max_steps: {self.max_steps}")
+        
         if cancel_event is not None:
             self.cancel_event = cancel_event
 
@@ -448,17 +446,22 @@ Requirements:
         if enable_deep_think:
             print(f"{Colors.BRIGHT_MAGENTA}🔮 Deep Think Mode Enabled{Colors.RESET}")
             print(f"{Colors.DIM}📝 Log file: {self.logger.get_log_file_path()}{Colors.RESET}")
+            logger.info(f"[{sid}] 深度思考模式已启用")
         else:
             print(f"{Colors.DIM}📝 Log file: {self.logger.get_log_file_path()}{Colors.RESET}")
 
         self.add_user_message(user_message)
+        logger.info(f"[{sid}] 用户消息已添加到上下文")
 
         step = 0
         run_start_time = perf_counter()
 
         while step < self.max_steps:
+            logger.info(f"[{sid}] 开始执行步骤 {step + 1}/{self.max_steps}")
+            
             if self._check_cancelled():
                 self._cleanup_incomplete_messages()
+                logger.error(f"[{sid}] 任务被用户取消")
                 yield {"type": "error", "content": "Task cancelled by user."}
                 return
 
@@ -476,6 +479,8 @@ Requirements:
 
             tool_list = list(self.tools.values())
 
+            logger.info(f"[{sid}] 可用工具: {[t.name for t in tool_list]}")
+            
             self.logger.log_request(messages=self.messages, tools=tool_list)
 
             full_content = ""
@@ -483,9 +488,13 @@ Requirements:
             thinking_started = False
             assistant_started = False
 
+            llm_start_time = time.time()
+            logger.info(f"[{sid}] 开始LLM流式生成...")
+            
             try:
-                async for chunk in self.llm.stream_generate(messages=self.messages, tools=tool_list):
-                    print(f"收到 chunk: {chunk}")
+                chunk_count = 0
+                async for chunk in self.llm.stream_generate(messages=self.messages, tools=tool_list, enable_deep_think=enable_deep_think):
+                    chunk_count += 1
                     if "[THINKING]" in chunk and "[/THINKING]" in chunk:
                         thinking_text = chunk.replace("[THINKING]", "").replace("[/THINKING]", "")
                         if not thinking_started:
@@ -508,14 +517,18 @@ Requirements:
                             yield {"type": "content", "content": chunk}
 
                 print(f"{Colors.RESET}")
+                logger.info(f"[{sid}] LLM流式生成完成，共 {chunk_count} 个片段 | 耗时: {time.time() - llm_start_time:.2f}s")
 
                 if thinking_content:
                     print(f"\n{Colors.DIM}{thinking_content}{Colors.RESET}")
+                    logger.info(f"[{sid}] 思考内容长度: {len(thinking_content)}")
 
-                response = await self.llm.generate(messages=self.messages, tools=tool_list)
+                logger.info(f"[{sid}] 获取完整LLM响应...")
+                response = await self.llm.generate(messages=self.messages, tools=tool_list, enable_deep_think=enable_deep_think)
 
                 if response.usage:
                     self.api_total_tokens = response.usage.total_tokens
+                    logger.info(f"[{sid}] Token使用: prompt={response.usage.prompt_tokens}, completion={response.usage.completion_tokens}, total={response.usage.total_tokens}")
 
                 self.logger.log_response(
                     content=response.content,
@@ -531,29 +544,41 @@ Requirements:
                     tool_calls=response.tool_calls,
                 )
                 self.messages.append(assistant_msg)
+                logger.info(f"[{sid}] 助手消息已添加到上下文")
 
                 if not response.tool_calls:
                     step_elapsed = perf_counter() - step_start_time
                     total_elapsed = perf_counter() - run_start_time
                     print(f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}")
+                    logger.info(f"[{sid}] 步骤 {step + 1} 完成，无工具调用 | 耗时: {step_elapsed:.2f}s | 总耗时: {total_elapsed:.2f}s")
+                    final_thinking = thinking_content or response.thinking
+                    if final_thinking:
+                        logger.info(f"[{sid}] 最终思考内容长度: {len(final_thinking)}")
                     yield {
                         "type": "done",
                         "content": response.content,
-                        "thinking": response.thinking,
+                        "thinking": final_thinking,
                         "steps": step + 1,
                         "tool_calls": 0,
                     }
+                    logger.info(f"[{sid}] Agent执行完成 | 总耗时: {time.time() - start_time:.2f}s")
                     return
 
                 if self._check_cancelled():
                     self._cleanup_incomplete_messages()
+                    logger.error(f"[{sid}] 任务被用户取消")
                     yield {"type": "error", "content": "Task cancelled by user."}
                     return
 
+                logger.info(f"[{sid}] 检测到 {len(response.tool_calls)} 个工具调用")
+                
                 for tool_call in response.tool_calls:
                     tool_call_id = tool_call.id
                     function_name = tool_call.function.name
                     arguments = tool_call.function.arguments
+
+                    logger.info(f"[{sid}] 执行工具调用: tool_name={function_name} | tool_call_id={tool_call_id}")
+                    logger.info(f"[{sid}] 工具参数: {json.dumps(arguments, ensure_ascii=False)}")
 
                     print(f"\n{Colors.BRIGHT_YELLOW}🔧 Tool Call:{Colors.RESET} {Colors.BOLD}{Colors.CYAN}{function_name}{Colors.RESET}")
 
@@ -577,6 +602,7 @@ Requirements:
                     }
 
                     if function_name not in self.tools:
+                        logger.error(f"[{sid}] 未知工具: {function_name}")
                         result = ToolResult(
                             success=False,
                             content="",
@@ -585,10 +611,13 @@ Requirements:
                     else:
                         try:
                             tool = self.tools[function_name]
+                            tool_start_time = time.time()
+                            logger.info(f"[{sid}] 开始执行工具: {function_name}")
                             result = await tool.execute(**arguments)
+                            logger.info(f"[{sid}] 工具执行完成: {function_name} | success={result.success} | 耗时: {time.time() - tool_start_time:.2f}s")
                         except Exception as e:
                             import traceback
-
+                            logger.error(f"[{sid}] 工具执行异常: {function_name} | error={str(e)}")
                             error_detail = f"{type(e).__name__}: {str(e)}"
                             error_trace = traceback.format_exc()
                             result = ToolResult(
@@ -604,6 +633,11 @@ Requirements:
                         result_content=result.content if result.success else None,
                         result_error=result.error if not result.success else None,
                     )
+
+                    if result.success:
+                        logger.info(f"[{sid}] 工具结果: success=True | content_length={len(result.content) if result.content else 0}")
+                    else:
+                        logger.info(f"[{sid}] 工具结果: success=False | error={result.error[:200] if result.error else 'None'}")
 
                     yield {
                         "type": "tool_result",
@@ -628,15 +662,18 @@ Requirements:
                         name=function_name,
                     )
                     self.messages.append(tool_msg)
+                    logger.info(f"[{sid}] 工具消息已添加到上下文")
 
                     if self._check_cancelled():
                         self._cleanup_incomplete_messages()
+                        logger.error(f"[{sid}] 任务被用户取消")
                         yield {"type": "error", "content": "Task cancelled by user."}
                         return
 
                 step_elapsed = perf_counter() - step_start_time
                 total_elapsed = perf_counter() - run_start_time
                 print(f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}")
+                logger.info(f"[{sid}] 步骤 {step + 1} 完成，有工具调用 | 耗时: {step_elapsed:.2f}s | 总耗时: {total_elapsed:.2f}s")
 
                 step += 1
 
@@ -649,11 +686,15 @@ Requirements:
                 else:
                     error_msg = f"LLM call failed: {str(e)}"
                     print(f"\n{Colors.BRIGHT_RED}❌ Error:{Colors.RESET} {error_msg}")
+                logger.error(f"[{sid}] 执行异常: {error_msg}")
+                import traceback
+                logger.error(f"[{sid}] 异常堆栈:\n{traceback.format_exc()}")
                 yield {"type": "error", "content": error_msg}
                 return
 
         error_msg = f"Task couldn't be completed after {self.max_steps} steps."
         print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {error_msg}{Colors.RESET}")
+        logger.error(f"[{sid}] {error_msg}")
         yield {"type": "error", "content": error_msg}
 
     def get_history(self) -> list[Message]:

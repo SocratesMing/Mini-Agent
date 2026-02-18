@@ -291,12 +291,14 @@ class AnthropicClient(LLMClientBase):
         self,
         messages: list[Message],
         tools: list[Any] | None = None,
+        enable_deep_think: bool = False,
     ) -> AsyncGenerator[str, None]:
         """Generate streaming response from Anthropic LLM.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of available tools
+            enable_deep_think: Not supported for Anthropic (ignored)
 
         Yields:
             Text chunks as they are generated
@@ -346,12 +348,14 @@ class AnthropicClient(LLMClientBase):
         self,
         messages: list[Message],
         tools: list[Any] | None = None,
+        enable_deep_think: bool = False,
     ) -> LLMResponse:
         """Generate response from Anthropic LLM.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of available tools
+            enable_deep_think: Not supported for Anthropic (ignored)
 
         Returns:
             LLMResponse containing the generated content

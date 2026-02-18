@@ -54,7 +54,7 @@
           <div class="session-name">{{ session.title || '未命名会话' }}</div>
         </div>
         <div class="session-actions">
-          <button @click.stop="toggleMenu(session.session_id)" class="menu-btn">
+          <button @click="toggleMenu(session.session_id, $event)" class="menu-btn">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
               <circle cx="12" cy="5" r="2"></circle>
               <circle cx="12" cy="12" r="2"></circle>
@@ -104,6 +104,52 @@
         </div>
       </div>
     </div>
+
+    <div class="user-profile" @click="toggleUserMenu">
+      <div class="user-avatar">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+          <circle cx="12" cy="7" r="4"></circle>
+        </svg>
+      </div>
+      <div class="user-info">
+        <div class="user-name">用户</div>
+        <div class="user-status">在线</div>
+      </div>
+      <svg class="user-arrow" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="6 9 12 15 18 9"></polyline>
+      </svg>
+      
+      <div v-if="showUserMenu" class="user-dropdown">
+        <div class="user-dropdown-header">
+          <div class="user-dropdown-avatar">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+          </div>
+          <div class="user-dropdown-info">
+            <div class="user-dropdown-name">用户</div>
+            <div class="user-dropdown-email">user@example.com</div>
+          </div>
+        </div>
+        <div class="user-dropdown-divider"></div>
+        <button class="user-dropdown-item">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+          个人资料
+        </button>
+        <button class="user-dropdown-item">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          设置
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -128,8 +174,17 @@ const showRenameModal = ref(false)
 const newTitle = ref('')
 const renamingSession = ref(null)
 const renameInput = ref(null)
+const showUserMenu = ref(false)
 
-function toggleMenu(sessionId) {
+function toggleUserMenu(e) {
+  e.stopPropagation()
+  showUserMenu.value = !showUserMenu.value
+}
+
+function toggleMenu(sessionId, e) {
+  if (e) {
+    e.stopPropagation()
+  }
   activeMenu.value = activeMenu.value === sessionId ? null : sessionId
 }
 
@@ -167,12 +222,15 @@ function closeMenu() {
 }
 
 onMounted(() => {
-  document.addEventListener('click', closeMenu)
+  document.addEventListener('click', () => {
+    closeMenu()
+    closeUserMenuSilent()
+  })
 })
 
-onUnmounted(() => {
-  document.removeEventListener('click', closeMenu)
-})
+function closeUserMenuSilent() {
+  showUserMenu.value = false
+}
 </script>
 
 <style scoped>
@@ -298,6 +356,7 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   padding: 12px 8px;
+  padding-bottom: 60px;
 }
 
 .sessions-header {
@@ -516,5 +575,140 @@ onUnmounted(() => {
 
 .confirm-btn:hover {
   background: #0284c7;
+}
+
+.user-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  cursor: pointer;
+  transition: background 0.2s;
+  position: relative;
+}
+
+.user-profile:hover {
+  background: #f1f5f9;
+}
+
+.user-avatar {
+  width: 36px;
+  height: 36px;
+  background: linear-gradient(135deg, #0ea5e9 0%, #8b5cf6 100%);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.user-avatar svg {
+  width: 20px;
+  height: 20px;
+  color: white;
+}
+
+.user-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1e293b;
+}
+
+.user-status {
+  font-size: 12px;
+  color: #22c55e;
+}
+
+.user-arrow {
+  width: 16px;
+  height: 16px;
+  color: #64748b;
+}
+
+.user-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px 12px 0 0;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+  margin-bottom: 8px;
+}
+
+.user-dropdown-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+}
+
+.user-dropdown-avatar {
+  width: 48px;
+  height: 48px;
+  background: linear-gradient(135deg, #0ea5e9 0%, #8b5cf6 100%);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.user-dropdown-avatar svg {
+  width: 24px;
+  height: 24px;
+  color: white;
+}
+
+.user-dropdown-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-dropdown-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.user-dropdown-email {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.user-dropdown-divider {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 0 8px;
+}
+
+.user-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 16px;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.user-dropdown-item svg {
+  width: 18px;
+  height: 18px;
+}
+
+.user-dropdown-item:hover {
+  background: #f1f5f9;
 }
 </style>

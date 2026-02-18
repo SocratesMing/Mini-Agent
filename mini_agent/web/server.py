@@ -32,7 +32,7 @@ def setup_logging():
     log_file = log_dir / "mini_agent.log"
     
     formatter = logging.Formatter(
-        fmt="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        fmt="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S"
     )
     
@@ -53,6 +53,12 @@ def setup_logging():
     logging.getLogger("uvicorn.access").setLevel(logging.INFO)
     
     return log_file
+
+
+def get_app_config():
+    """获取应用配置."""
+    from mini_agent.config import Config as AppConfig
+    return AppConfig.load()
 
 
 def load_system_prompt(path: str) -> str:

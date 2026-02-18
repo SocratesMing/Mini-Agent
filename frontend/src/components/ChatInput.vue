@@ -129,7 +129,7 @@ const emit = defineEmits(['send', 'stop'])
 const message = ref('')
 const textareaRef = ref(null)
 const uploadedFiles = ref([])
-const enableDeepThink = ref(false)
+const enableDeepThink = ref(true)
 let abortController = null
 
 const canSend = computed(() => {

@@ -115,31 +115,35 @@ class LLMClient:
         self,
         messages: list[Message],
         tools: list | None = None,
+        enable_deep_think: bool = False,
     ) -> LLMResponse:
         """Generate response from LLM.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of Tool objects or dicts
+            enable_deep_think: Whether to enable deep thinking mode
 
         Returns:
             LLMResponse containing the generated content
         """
-        return await self._client.generate(messages, tools)
+        return await self._client.generate(messages, tools, enable_deep_think)
 
     async def stream_generate(
         self,
         messages: list[Message],
         tools: list[Any] | None = None,
+        enable_deep_think: bool = False,
     ) -> AsyncGenerator[str, None]:
         """Stream generate response from LLM.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of Tool objects or dicts
+            enable_deep_think: Whether to enable deep thinking mode
 
         Yields:
             Text chunks as they are generated
         """
-        async for chunk in self._client.stream_generate(messages, tools):
+        async for chunk in self._client.stream_generate(messages, tools, enable_deep_think):
             yield chunk

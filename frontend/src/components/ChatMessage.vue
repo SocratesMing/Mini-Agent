@@ -1,6 +1,13 @@
 <template>
   <div class="message" :class="[message.role]">
     <div class="message-content">
+      <!-- 加载状态 -->
+      <div v-if="message.loading && sortedBlocks.length === 0 && !message.content" class="loading-indicator">
+        <span class="dot"></span>
+        <span class="dot"></span>
+        <span class="dot"></span>
+      </div>
+      
       <!-- 按顺序渲染内容块 -->
       <template v-if="sortedBlocks.length > 0">
         <template v-for="(block, index) in sortedBlocks" :key="index">
@@ -666,5 +673,37 @@ onMounted(() => {
 .message-text :deep(.code-copy-btn svg) {
   width: 14px;
   height: 14px;
+}
+
+.loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+}
+
+.loading-indicator .dot {
+  width: 6px;
+  height: 6px;
+  background: #94a3b8;
+  border-radius: 50%;
+  animation: bounce 1.4s infinite ease-in-out both;
+}
+
+.loading-indicator .dot:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.loading-indicator .dot:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: scale(0);
+  }
+  40% {
+    transform: scale(1);
+  }
 }
 </style>

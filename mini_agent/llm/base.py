@@ -42,12 +42,14 @@ class LLMClientBase(ABC):
         self,
         messages: list[Message],
         tools: list[Any] | None = None,
+        enable_deep_think: bool = False,
     ) -> LLMResponse:
         """Generate response from LLM.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of Tool objects or dicts
+            enable_deep_think: Whether to enable deep thinking mode
 
         Returns:
             LLMResponse containing the generated content, thinking, and tool calls
@@ -59,12 +61,14 @@ class LLMClientBase(ABC):
         self,
         messages: list[Message],
         tools: list[Any] | None = None,
+        enable_deep_think: bool = False,
     ) -> AsyncGenerator[str, None]:
         """Stream generate response from LLM.
 
         Args:
             messages: List of conversation messages
             tools: Optional list of Tool objects or dicts
+            enable_deep_think: Whether to enable deep thinking mode
 
         Yields:
             Text chunks as they are generated
