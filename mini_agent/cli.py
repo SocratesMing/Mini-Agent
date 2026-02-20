@@ -491,9 +491,7 @@ async def _quiet_cleanup():
         pass
 
 
-async def run_agent(workspace_dir: Path, task: str = None):
-    """Run Agent in interactive or non-interactive mode.
-async def run_agent(workspace_dir: Path, stream: bool = False):
+async def run_agent(workspace_dir: Path, task: str = None,stream: bool = False):
     """Run interactive Agent
 
     Args:

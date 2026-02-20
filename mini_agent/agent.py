@@ -325,14 +325,6 @@ Requirements:
             )
             self.messages.append(assistant_msg)
 
-            if response.thinking:
-                print(f"\n{Colors.BOLD}{Colors.MAGENTA}🧠 Thinking:{Colors.RESET}")
-                print(f"{Colors.DIM}{response.thinking}{Colors.RESET}")
-
-            if response.content:
-                print(f"\n{Colors.BOLD}{Colors.BRIGHT_BLUE}🤖 Assistant:{Colors.RESET}")
-                print(f"{response.content}")
-
             if not response.tool_calls:
                 step_elapsed = perf_counter() - step_start_time
                 total_elapsed = perf_counter() - run_start_time
@@ -487,6 +479,8 @@ Requirements:
             thinking_content = None
             thinking_started = False
             assistant_started = False
+            full_response = ""
+            thinking_content = ""
 
             llm_start_time = time.time()
             logger.info(f"[{sid}] 开始LLM流式生成...")
@@ -499,28 +493,20 @@ Requirements:
                         thinking_text = chunk.replace("[THINKING]", "").replace("[/THINKING]", "")
                         if not thinking_started:
                             thinking_started = True
-                            print(f"\n{Colors.BOLD}{Colors.MAGENTA}🧠 Thinking:{Colors.RESET}")
-                            print(f"{Colors.DIM}", end="", flush=True)
                             yield {"type": "thinking_start", "content": ""}
-                        print(thinking_text, end="", flush=True)
                         thinking_content = (thinking_content or "") + thinking_text
                         yield {"type": "thinking", "content": thinking_text}
                     else:
                         if chunk and not assistant_started:
                             assistant_started = True
-                            print(f"\n{Colors.BOLD}{Colors.BRIGHT_BLUE}🤖 Assistant:{Colors.RESET}")
-                            print(f"{Colors.CYAN}", end="", flush=True)
                             yield {"type": "assistant_start", "content": ""}
                         if chunk:
-                            print(chunk, end="", flush=True)
-                            full_content += chunk
+                            full_response += chunk
                             yield {"type": "content", "content": chunk}
 
-                print(f"{Colors.RESET}")
                 logger.info(f"[{sid}] LLM流式生成完成，共 {chunk_count} 个片段 | 耗时: {time.time() - llm_start_time:.2f}s")
 
                 if thinking_content:
-                    print(f"\n{Colors.DIM}{thinking_content}{Colors.RESET}")
                     logger.info(f"[{sid}] 思考内容长度: {len(thinking_content)}")
 
                 logger.info(f"[{sid}] 获取完整LLM响应...")
