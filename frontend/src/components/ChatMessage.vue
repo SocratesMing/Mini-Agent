@@ -103,6 +103,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { marked } from 'marked'
+import hljs from 'highlight.js'
+import 'highlight.js/styles/atom-one-dark.css'
 
 const props = defineProps({
   message: {
@@ -152,10 +154,16 @@ renderer.code = function(data) {
   }
   
   const langLabel = language || 'code'
-  const escapedCode = code
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+  let highlightedCode = code
+  try {
+    if (language && hljs.getLanguage(language)) {
+      highlightedCode = hljs.highlight(code, { language }).value
+    } else {
+      highlightedCode = hljs.highlightAuto(code).value
+    }
+  } catch (e) {
+    highlightedCode = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  }
   
   return `
     <div class="code-block-wrapper">
@@ -169,7 +177,7 @@ renderer.code = function(data) {
           <span>复制</span>
         </button>
       </div>
-      <pre><code class="language-${language}">${escapedCode}</code></pre>
+      <pre><code class="hljs">${highlightedCode}</code></pre>
     </div>
   `
 }
@@ -518,7 +526,7 @@ onMounted(() => {
 
 .message-text {
   width: 100%;
-  background: #f1f5f9;
+  background: transparent;
   padding: 12px 16px;
   border-radius: 16px;
   font-size: 14px;
