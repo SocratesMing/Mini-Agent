@@ -46,24 +46,30 @@
           class="file-card"
         >
           <div class="file-icon" :class="getCategoryClass(file.category)">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-            </svg>
+            <FileIcon :filename="file.filename" :size="48" />
           </div>
           <div class="file-info">
             <div class="file-name" :title="file.filename">{{ file.filename }}</div>
             <div class="file-meta">
               <span class="file-size">{{ formatSize(file.size) }}</span>
-              <span class="file-session" v-if="file.session_title">{{ file.session_title }}</span>
+              <span class="file-type-badge">{{ getFileTypeLabel(file.filename) }}</span>
             </div>
           </div>
-          <button class="file-action" @click="copyPath(file.file_path)" title="复制路径">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
-          </button>
+          <div class="file-actions">
+            <button class="file-action" @click="downloadFile(file)" title="下载文件">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+            </button>
+            <button class="file-action" @click="copyPath(file.file_path)" title="复制路径">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -71,8 +77,16 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, onActivated } from 'vue'
 import { getAllFiles } from '../api/files.js'
+import FileIcon from './FileIcon.vue'
+
+const props = defineProps({
+  visible: {
+    type: Boolean,
+    default: true
+  }
+})
 
 const loading = ref(false)
 const allFiles = ref([])
@@ -103,6 +117,11 @@ function getCategoryClass(category) {
     '其他': 'other'
   }
   return classes[category] || 'other'
+}
+
+function getFileTypeLabel(filename) {
+  const ext = filename.split('.').pop().toUpperCase()
+  return ext
 }
 
 function getFileCategory(filename) {
@@ -170,8 +189,25 @@ async function copyPath(path) {
   }
 }
 
+function downloadFile(file) {
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+  const url = `${API_BASE_URL}/api/sessions/files/${encodeURIComponent(file.filename)}/download`
+  const link = document.createElement('a')
+  link.href = url
+  link.download = file.filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+}
+
 onMounted(() => {
   refreshAssets()
+})
+
+watch(() => props.visible, (newVal) => {
+  if (newVal) {
+    refreshAssets()
+  }
 })
 </script>
 
@@ -362,39 +398,32 @@ onMounted(() => {
 }
 
 .file-icon {
-  width: 48px;
-  height: 48px;
-  border-radius: 10px;
+  width: 56px;
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
 
-.file-icon svg {
-  width: 24px;
-  height: 24px;
-  color: white;
-}
-
 .file-icon.doc {
-  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  background: transparent;
 }
 
 .file-icon.image {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  background: transparent;
 }
 
 .file-icon.code {
-  background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%);
+  background: transparent;
 }
 
 .file-icon.data {
-  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  background: transparent;
 }
 
 .file-icon.other {
-  background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+  background: transparent;
 }
 
 .file-info {
@@ -417,6 +446,17 @@ onMounted(() => {
   gap: 12px;
   font-size: 12px;
   color: #94a3b8;
+  align-items: center;
+}
+
+.file-type-badge {
+  background: #f1f5f9;
+  color: #475569;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
 }
 
 .file-session {
@@ -424,6 +464,11 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.file-actions {
+  display: flex;
+  gap: 4px;
 }
 
 .file-action {

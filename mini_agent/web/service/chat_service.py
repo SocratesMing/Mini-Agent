@@ -111,14 +111,17 @@ async def chat_stream_generator(
     session_id: str,
     message_id: str,
     http_request: Optional["Request"] = None,
+    parsed_content: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """生成聊天流式响应."""
     start_time = time.time()
     sid = session_id[-5:] if session_id else "-----"
     
+    message_content = parsed_content if parsed_content else request.message
+    
     logger.info(f"[{sid}] 开始流式响应生成")
     logger.info(f"[{sid}] session_id: {session_id} | message_id: {message_id}")
-    logger.info(f"[{sid}] message: {request.message[:50]}{'...' if len(request.message) > 50 else ''} | enable_deep_think: {request.enable_deep_think}")
+    logger.info(f"[{sid}] message: {message_content[:50]}{'...' if len(message_content) > 50 else ''} | enable_deep_think: {request.enable_deep_think}")
     logger.info(f"[{sid}] 请求日志已记录")
     
     session = db.get_session(session_id)
@@ -127,6 +130,12 @@ async def chat_stream_generator(
         logger.error(f"[{sid}] 会话不存在")
         yield f"data: {json.dumps({'type': 'error', 'content': '会话不存在'}, ensure_ascii=False)}\n\n"
         return
+    
+    if len(session.messages) == 0 and message_content:
+        session.title = message_content[:12] + "..." if len(message_content) > 12 else message_content
+        session.updated_at = datetime.now().isoformat()
+        db.update_session(session)
+        logger.info(f"[{sid}] 更新会话标题: {session.title}")
     
     full_response = ""
     thinking_content = None
@@ -166,14 +175,14 @@ async def chat_stream_generator(
         disconnect_task = asyncio.create_task(check_client_disconnect())
     
     try:
-        start_event = {'type': 'start', 'session_id': session_id, 'message_id': message_id}
-        logger.info(f"[{sid}] 发送事件: start")
+        start_event = {'type': 'start', 'session_id': session_id, 'message_id': message_id, 'title': session.title}
+        logger.info(f"[{sid}] 发送事件: start | 标题: {session.title}")
         yield f"data: {json.dumps(start_event, ensure_ascii=False)}\n\n"
         
         event_count = 0
         step_start_time = time.time()
         
-        async for event in agent.run_stream(request.message, enable_deep_think=request.enable_deep_think):
+        async for event in agent.run_stream(message_content, enable_deep_think=request.enable_deep_think):
             event_count += 1
             event_type = event.get("type", "unknown")
             event_time = time.time() - step_start_time
@@ -262,7 +271,10 @@ async def chat_stream_generator(
                 tool_calls = event.get("tool_calls", 0)
                 
                 logger.info(f"[{sid}] 思考完成 | 长度: {len(thinking_content) if thinking_content else 0}")
+                if thinking_content:
+                    logger.info(f"[{sid}] 思考内容全文:\n{thinking_content}")
                 logger.info(f"[{sid}] 正式内容完成 | 长度: {len(full_response)}")
+                logger.info(f"[{sid}] 正式响应全文:\n{full_response}")
                 logger.info(f"[{sid}] 响应完成: steps={steps} | tool_calls={tool_calls}")
                 
                 if thinking_content:
@@ -355,7 +367,7 @@ async def chat_non_stream(
         now = datetime.now().isoformat()
         session_data = SessionModel(
             session_id=session_id,
-            title=request.message[:5] + "..." if len(request.message) > 5 else request.message,
+            title=request.message[:12] + "..." if len(request.message) > 12 else request.message,
             messages=[],
             created_at=now,
             updated_at=now,
@@ -365,8 +377,10 @@ async def chat_non_stream(
     else:
         session = db.get_session(session_id)
         if session and len(session.messages) == 0:
-            new_title = request.message[:5] + "..." if len(request.message) > 5 else request.message
+            new_title = request.message[:12] + "..." if len(request.message) > 12 else request.message
             session.title = new_title
+            session.updated_at = datetime.now().isoformat()
+            db.update_session(session)
             logger.info(f"[{sid}] 更新会话标题 | 新标题: {new_title}")
     
     user_message = {

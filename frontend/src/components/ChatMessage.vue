@@ -8,6 +8,38 @@
         <span class="dot"></span>
       </div>
       
+      <!-- 文件卡片 -->
+      <div v-if="message.files && message.files.length > 0" class="files-container">
+        <div 
+          v-for="(file, index) in message.files" 
+          :key="index" 
+          class="file-card"
+        >
+          <div class="file-icon">
+            <FileIcon :filename="file.filename" :size="40" />
+          </div>
+          <div class="file-info">
+            <span class="file-name">{{ file.filename }}</span>
+            <div class="file-meta">
+              <span class="file-size">{{ formatSize(file.size) }}</span>
+              <span class="file-type">{{ getFileExtension(file.filename) }}</span>
+            </div>
+          </div>
+          <!-- 上传成功后的文件卡片不需要删除按钮 -->
+          <!-- <button 
+            v-if="message.role === 'user'" 
+            @click="removeFile(index)" 
+            class="remove-file-btn"
+            title="删除文件"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button> -->
+        </div>
+      </div>
+      
       <!-- 按顺序渲染内容块 -->
       <template v-if="sortedBlocks.length > 0">
         <template v-for="(block, index) in sortedBlocks" :key="index">
@@ -47,7 +79,7 @@
           </div>
 
           <!-- 内容块 -->
-          <div v-if="block.type === 'content'" class="message-text" v-html="renderContent(block.content)"></div>
+          <div v-if="block.type === 'content'" class="message-text" v-html="renderMarkdown(block.content)"></div>
         </template>
       </template>
 
@@ -84,7 +116,7 @@
           </div>
         </div>
 
-        <div class="message-text" v-html="renderedContent"></div>
+        <div v-if="message.content" class="message-text" v-html="renderMarkdown(message.content)"></div>
       </template>
       
       <!-- 用户消息显示复制按钮 -->
@@ -101,10 +133,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, shallowRef } from 'vue'
+import { createHighlighter } from 'shiki'
 import { marked } from 'marked'
-import hljs from 'highlight.js'
-import 'highlight.js/styles/atom-one-dark.css'
+import FileIcon from './FileIcon.vue'
 
 const props = defineProps({
   message: {
@@ -113,10 +145,37 @@ const props = defineProps({
   }
 })
 
+const emit = defineEmits(['removeFile'])
+
 const showThinking = ref(false)
 const expandedThinking = ref({})
 const expandedToolCall = ref({})
 const expandedToolResult = ref({})
+const highlighter = shallowRef(null)
+
+const langAliases = {
+  'js': 'javascript',
+  'ts': 'typescript',
+  'py': 'python',
+  'rb': 'ruby',
+  'sh': 'bash',
+  'yml': 'yaml',
+  'md': 'markdown',
+  'c++': 'cpp',
+  'c#': 'csharp',
+  'cs': 'csharp',
+}
+
+onMounted(async () => {
+  try {
+    highlighter.value = await createHighlighter({
+      themes: ['github-light'],
+      langs: ['javascript', 'typescript', 'python', 'java', 'cpp', 'c', 'go', 'rust', 'html', 'css', 'json', 'yaml', 'markdown', 'bash', 'shell', 'sql', 'xml', 'vue', 'jsx', 'tsx', 'text']
+    })
+  } catch (e) {
+    console.error('Shiki 初始化失败:', e)
+  }
+})
 
 const sortedBlocks = computed(() => {
   if (!props.message.blocks) return []
@@ -139,61 +198,79 @@ function toggleToolResult(index) {
   expandedToolResult.value[index] = !expandedToolResult.value[index]
 }
 
+function highlightCode(code, lang) {
+  if (!highlighter.value) {
+    return `<pre style="background: #f6f8fa; padding: 12px; border-radius: 8px; overflow-x: auto; border: 1px solid #e1e4e8;"><code style="color: #24292e; font-family: 'Fira Code', Consolas, monospace; font-size: 13px;">${escapeHtml(code)}</code></pre>`
+  }
+  
+  const normalizedLang = lang ? lang.toLowerCase() : 'text'
+  const mappedLang = langAliases[normalizedLang] || normalizedLang
+  
+  const loadedLangs = highlighter.value.getLoadedLanguages()
+  const validLang = loadedLangs.includes(mappedLang) ? mappedLang : 'text'
+  
+  try {
+    const html = highlighter.value.codeToHtml(code, {
+      lang: validLang,
+      theme: 'github-light'
+    })
+    return html
+  } catch (e) {
+    console.error('Shiki 高亮失败:', e, 'lang:', validLang)
+    return `<pre style="background: #f6f8fa; padding: 12px; border-radius: 8px; overflow-x: auto; border: 1px solid #e1e4e8;"><code style="color: #24292e; font-family: 'Fira Code', Consolas, monospace; font-size: 13px;">${escapeHtml(code)}</code></pre>`
+  }
+}
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
 const renderer = new marked.Renderer()
 
-renderer.code = function(data) {
+renderer.code = function(token) {
   let code = ''
   let language = ''
   
-  if (typeof data === 'object') {
-    code = data.text || data.raw || ''
-    language = data.lang || ''
+  if (typeof token === 'object') {
+    code = token.text || token.raw || ''
+    language = token.lang || ''
   } else {
     code = arguments[0] || ''
     language = arguments[1] || ''
   }
   
-  const langLabel = language || 'code'
-  let highlightedCode = code
-  try {
-    if (language && hljs.getLanguage(language)) {
-      highlightedCode = hljs.highlight(code, { language }).value
-    } else {
-      highlightedCode = hljs.highlightAuto(code).value
-    }
-  } catch (e) {
-    highlightedCode = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  }
+  const langLabel = language || 'text'
+  const highlightedCode = highlightCode(code, language)
   
-  return `
-    <div class="code-block-wrapper">
-      <div class="code-header">
-        <span class="code-lang">${langLabel}</span>
-        <button class="code-copy-btn" onclick="copyCode(this)">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-          </svg>
-          <span>复制</span>
-        </button>
-      </div>
-      <pre><code class="hljs">${highlightedCode}</code></pre>
+  return `<div class="code-block-wrapper">
+    <div class="code-header">
+      <span class="code-lang">${langLabel}</span>
+      <button class="code-copy-btn" onclick="copyCode(this)">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+        <span>复制</span>
+      </button>
     </div>
-  `
+    ${highlightedCode}
+  </div>`
 }
 
-function renderContent(content) {
+function renderMarkdown(content) {
   if (!content) return ''
   try {
-    return marked(content, { renderer })
+    return marked.parse(content, { renderer, breaks: true, gfm: true })
   } catch (e) {
-    return content.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
+    console.error('Markdown 渲染失败:', e)
+    return escapeHtml(content)
   }
 }
-
-const renderedContent = computed(() => {
-  return renderContent(props.message.content)
-})
 
 function formatJson(obj) {
   try {
@@ -209,6 +286,20 @@ function truncateResult(result) {
   return str.length > 500 ? str.substring(0, 500) + '...' : str
 }
 
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+function getFileExtension(filename) {
+  const parts = filename.split('.')
+  if (parts.length > 1) {
+    return parts[parts.length - 1].toUpperCase()
+  }
+  return 'FILE'
+}
+
 async function copyMessage() {
   if (!props.message.content) return
   
@@ -216,6 +307,14 @@ async function copyMessage() {
     await navigator.clipboard.writeText(props.message.content)
   } catch (err) {
     console.error('复制失败:', err)
+  }
+}
+
+function removeFile(index) {
+  if (props.message.files && props.message.files[index]) {
+    const file = props.message.files[index]
+    // 通知父组件删除文件
+    emit('removeFile', file)
   }
 }
 
@@ -250,8 +349,6 @@ onMounted(() => {
   gap: 12px;
   padding: 12px 0;
   animation: fadeIn 0.3s ease-out;
-  width: 80%;
-  margin: 0 auto;
 }
 
 @keyframes fadeIn {
@@ -267,27 +364,147 @@ onMounted(() => {
 
 .message.user {
   justify-content: flex-end;
+  width: 80%;
+  max-width: 900px;
+  margin: 0 auto;
 }
 
 .message.assistant {
   justify-content: flex-start;
+  width: 80%;
+  max-width: 900px;
+  margin: 0 auto;
 }
 
 .message-content {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
+  width: 100%;
 }
 
 .message.user .message-content {
   align-items: flex-end;
-  max-width: 80%;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.message.user .message-content .message-text {
+  width: fit-content;
+  max-width: 100%;
 }
 
 .message.assistant .message-content {
   align-items: flex-start;
-  width: 80%;
+  width: 100%;
 }
+
+/* 文件容器样式 */
+.files-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+  width: 100%;
+}
+
+/* 文件卡片样式 */
+.file-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  max-width: 250px;
+  flex-shrink: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.remove-file-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: #f1f5f9;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.remove-file-btn:hover {
+  background: #fee2e2;
+  transform: scale(1.05);
+}
+
+.remove-file-btn svg {
+  width: 14px;
+  height: 14px;
+  color: #64748b;
+}
+
+.remove-file-btn:hover svg {
+  color: #dc2626;
+}
+
+.file-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
+}
+
+/* 文件图标样式 */
+.file-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.file-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.file-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #1E293B;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-size {
+  font-size: 12px;
+  color: #64748B;
+}
+
+.file-type {
+  font-size: 11px;
+  color: #94A3B8;
+  text-transform: uppercase;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #F1F5F9;
+}
+
 
 .thinking-block {
   width: 100%;
@@ -525,23 +742,32 @@ onMounted(() => {
 }
 
 .message-text {
-  width: 100%;
   background: transparent;
   padding: 12px 16px;
   border-radius: 16px;
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 16px;
+  line-height: 1.7;
   color: #1e293b;
   word-break: break-word;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .message-text :deep(pre) {
-  background: #1e293b;
-  color: #e2e8f0;
-  padding: 12px;
+  background: #f6f8fa;
+  color: #24292e;
+  padding: 14px;
   border-radius: 8px;
   overflow-x: auto;
-  margin: 8px 0;
+  margin: 16px 0;
+  border: 1px solid #e1e4e8;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.message-text :deep(pre code) {
+  font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
 }
 
 .message-text :deep(code) {
@@ -550,7 +776,7 @@ onMounted(() => {
 }
 
 .message-text :deep(p) {
-  margin: 8px 0;
+  margin: 20px 0;
 }
 
 .message-text :deep(p:first-child) {
@@ -562,15 +788,66 @@ onMounted(() => {
 }
 
 .message-text :deep(ul), .message-text :deep(ol) {
-  margin: 8px 0;
-  padding-left: 24px;
+  margin: 20px 0;
+  padding-left: 28px;
+}
+
+.message-text :deep(li) {
+  margin: 12px 0;
 }
 
 .message-text :deep(blockquote) {
   border-left: 3px solid #0ea5e9;
-  margin: 8px 0;
-  padding-left: 12px;
+  margin: 20px 0;
+  padding-left: 16px;
   color: #64748b;
+}
+
+.message-text :deep(h1),
+.message-text :deep(h2),
+.message-text :deep(h3),
+.message-text :deep(h4),
+.message-text :deep(h5),
+.message-text :deep(h6) {
+  margin: 28px 0 20px 0;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.message-text :deep(h1:first-child),
+.message-text :deep(h2:first-child),
+.message-text :deep(h3:first-child),
+.message-text :deep(h4:first-child),
+.message-text :deep(h5:first-child),
+.message-text :deep(h6:first-child) {
+  margin-top: 0;
+}
+
+.message-text :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 24px 0;
+  font-size: 13px;
+}
+
+.message-text :deep(th),
+.message-text :deep(td) {
+  border: 1px solid #e2e8f0;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.message-text :deep(th) {
+  background: #f1f5f9;
+  font-weight: 600;
+}
+
+.message-text :deep(tr:nth-child(even)) {
+  background: #f8fafc;
+}
+
+.message-text :deep(tr:hover) {
+  background: #f1f5f9;
 }
 
 .message.user .message-text {
@@ -580,11 +857,33 @@ onMounted(() => {
 }
 
 .message.user .message-text :deep(pre) {
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .message.user .message-text :deep(blockquote) {
   border-left-color: rgba(255, 255, 255, 0.5);
+}
+
+.message.user .message-text :deep(table) {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.message.user .message-text :deep(th),
+.message.user .message-text :deep(td) {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.message.user .message-text :deep(th) {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.message.user .message-text :deep(tr:nth-child(even)) {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.message.user .message-text :deep(tr:hover) {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .message-actions {
@@ -628,26 +927,56 @@ onMounted(() => {
 .message-text :deep(.code-block-wrapper) {
   position: relative;
   margin: 8px 0;
+  width: 100%;
+}
+
+.message-text :deep(.code-block-wrapper pre) {
+  margin: 0;
+  padding: 12px 16px;
+  overflow-x: auto;
+  border-radius: 0 0 8px 8px;
+  background: #f6f8fa !important;
+  border: 1px solid #e1e4e8;
+  border-top: none;
+}
+
+.message-text :deep(.code-block-wrapper pre code) {
+  font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #24292e;
+}
+
+.message-text :deep(.code-block-wrapper .shiki) {
+  background: #f6f8fa !important;
+  padding: 12px 16px;
+  margin: 0;
+  border-radius: 0 0 8px 8px;
+  overflow-x: auto;
+}
+
+.message-text :deep(.code-block-wrapper .shiki code) {
+  display: block;
+  font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .message-text :deep(.code-header) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #334155;
+  background: #f1f3f5;
   padding: 10px 16px;
   border-radius: 8px 8px 0 0;
   min-height: 40px;
-}
-
-.message-text :deep(.code-block-wrapper pre) {
-  border-radius: 0 0 8px 8px;
-  margin: 0;
+  border: 1px solid #e1e4e8;
+  border-bottom: none;
 }
 
 .message-text :deep(.code-lang) {
   font-size: 12px;
-  color: #94a3b8;
+  color: #57606a;
   font-weight: 500;
   display: flex;
   align-items: center;
@@ -659,10 +988,10 @@ onMounted(() => {
   justify-content: center;
   gap: 4px;
   padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.1);
-  border: none;
+  background: #ffffff;
+  border: 1px solid #d0d7de;
   border-radius: 6px;
-  color: #94a3b8;
+  color: #57606a;
   font-size: 12px;
   cursor: pointer;
   transition: all 0.2s;
@@ -670,8 +999,9 @@ onMounted(() => {
 }
 
 .message-text :deep(.code-copy-btn:hover) {
-  background: rgba(255, 255, 255, 0.2);
-  color: #e2e8f0;
+  background: #f3f4f6;
+  border-color: #8c959f;
+  color: #24292e;
 }
 
 .message-text :deep(.code-copy-btn.copied) {

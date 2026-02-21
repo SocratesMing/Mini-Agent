@@ -76,6 +76,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = Field(default=None, description="会话ID，不提供则创建新会话")
     message_id: Optional[str] = Field(default=None, description="消息ID，用于追踪单条消息（可选）")
     enable_deep_think: bool = Field(default=False, description="是否启用深度思考模式")
+    files: Optional[List[dict]] = Field(default=None, description="用户上传的文件列表")
 
 
 class ChatResponse(BaseModel):
@@ -162,4 +163,23 @@ class GetChatHistoryResponse(BaseModel):
     messages: List[dict[str, Any]] = Field(default_factory=list, description="消息列表")
     created_at: str = Field(..., description="创建时间")
     updated_at: str = Field(..., description="更新时间")
+
+
+class UserProfile(BaseModel):
+    """用户资料模型."""
+    
+    user_id: str = Field(..., description="用户ID")
+    username: str = Field(..., description="用户名")
+    organization_id: str = Field(default="", description="机构ID")
+    email: str = Field(default="", description="用户邮箱")
+    created_at: str = Field(..., description="创建时间")
+    updated_at: str = Field(..., description="更新时间")
+
+
+class UpdateUserProfileRequest(BaseModel):
+    """更新用户资料请求模型."""
+    
+    username: Optional[str] = Field(default=None, description="用户名")
+    organization_id: Optional[str] = Field(default=None, description="机构ID")
+    email: Optional[str] = Field(default=None, description="用户邮箱")
 

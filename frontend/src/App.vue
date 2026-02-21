@@ -1,55 +1,72 @@
 <template>
   <div class="app-container">
-    <SessionList
-      v-show="!isSidebarCollapsed"
-      :sessions="sessions"
-      :currentSessionId="currentSessionId"
-      @createSession="handleCreateSession"
-      @selectSession="handleSelectSession"
-      @deleteSession="handleDeleteSession"
-      @renameSession="handleRenameSession"
-      @toggleSidebar="toggleSidebar"
-      @showAssets="handleShowAssets"
+    <Welcome 
+      v-if="showWelcome" 
+      @completed="handleWelcomeCompleted" 
     />
     
-    <button 
-      v-if="isSidebarCollapsed"
-      class="expand-sidebar-btn"
-      @click="toggleSidebar"
-      title="展开侧边栏"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-        <line x1="9" y1="3" x2="9" y2="21"></line>
-      </svg>
-    </button>
-    
-    <AssetsPanel v-if="showAssets" @close="showAssets = false" />
-    
-    <Chat
-      v-else
-      :messages="messages"
-      :currentSessionId="currentSessionId"
-      :isStreaming="isStreaming"
-      @sendMessage="handleSendMessage"
-      @stop="handleStop"
-    />
-    
-    <div v-if="error" class="error-toast">
-      {{ error }}
-      <button @click="error = null">×</button>
-    </div>
+    <template v-else>
+      <SessionList
+        v-show="!isSidebarCollapsed"
+        :sessions="sessions"
+        :currentSessionId="currentSessionId"
+        :username="userProfile.username"
+        :email="userProfile.email"
+        @createSession="handleCreateSession"
+        @selectSession="handleSelectSession"
+        @deleteSession="handleDeleteSession"
+        @renameSession="handleRenameSession"
+        @toggleSidebar="toggleSidebar"
+        @showAssets="handleShowAssets"
+        @showProfile="handleShowProfile"
+      />
+      
+      <button 
+        v-if="isSidebarCollapsed"
+        class="expand-sidebar-btn"
+        @click="toggleSidebar"
+        title="展开侧边栏"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="9" y1="3" x2="9" y2="21"></line>
+        </svg>
+      </button>
+      
+      <AssetsPanel v-if="showAssets" :visible="showAssets" @close="showAssets = false" />
+      
+      <UserProfile 
+        v-if="showUserProfile" 
+        @close="showUserProfile = false"
+      />
+      
+      <Chat
+        v-else-if="!showAssets && !showUserProfile"
+        :messages="messages"
+        :currentSessionId="currentSessionId"
+        :isStreaming="isStreaming"
+        @sendMessage="handleSendMessage"
+        @createSession="ensureCurrentSession"
+        @removeFile="handleRemoveFile"
+        @stop="handleStop"
+      />
+      
+      <div v-if="error" class="error-toast">
+        {{ error }}
+        <button @click="error = null">×</button>
+      </div>
 
-    <!-- 返回上一页按钮 -->
-    <button 
-      class="go-back-btn"
-      @click="goBack"
-      title="返回上一页"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 19V5M5 12l7-7 7 7"/>
-      </svg>
-    </button>
+      <!-- 返回上一页按钮 -->
+      <button 
+        class="go-back-btn"
+        @click="goBack"
+        title="返回上一页"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 19V5M5 12l7-7 7 7"/>
+        </svg>
+      </button>
+    </template>
   </div>
 </template>
 
@@ -58,8 +75,10 @@ import { ref, onMounted } from 'vue'
 import SessionList from './components/SessionList.vue'
 import Chat from './components/Chat.vue'
 import AssetsPanel from './components/AssetsPanel.vue'
+import UserProfile from './components/UserProfile.vue'
+import Welcome from './components/Welcome.vue'
 import { createSession, listSessions, getChatHistory, deleteSession, sendMessage, renameSession } from './api/chat.js'
-import { uploadFile } from './api/files.js'
+import { uploadFile, deleteFile, getUserProfile } from './api/files.js'
 
 const sessions = ref([])
 const currentSessionId = ref(null)
@@ -68,6 +87,13 @@ const isStreaming = ref(false)
 const error = ref(null)
 const isSidebarCollapsed = ref(false)
 const showAssets = ref(false)
+const showUserProfile = ref(false)
+const showWelcome = ref(false)
+const userProfile = ref({
+  username: '',
+  organization_id: '',
+  email: ''
+})
 
 function toggleSidebar() {
   isSidebarCollapsed.value = !isSidebarCollapsed.value
@@ -75,6 +101,46 @@ function toggleSidebar() {
 
 function handleShowAssets() {
   showAssets.value = !showAssets.value
+}
+
+function handleShowProfile() {
+  showUserProfile.value = true
+  showAssets.value = false
+}
+
+async function handleWelcomeCompleted(profile) {
+  userProfile.value = profile
+  showWelcome.value = false
+  await loadSessions()
+  if (sessions.value.length > 0) {
+    currentSessionId.value = sessions.value[0].session_id
+  }
+}
+
+function goBack() {
+  if (showUserProfile.value) {
+    showUserProfile.value = false
+  } else if (showAssets.value) {
+    showAssets.value = false
+  }
+}
+
+async function loadUserProfile() {
+  try {
+    const profile = await getUserProfile()
+    if (!profile.username || profile.username === 'default_user') {
+      showWelcome.value = true
+      return
+    }
+    userProfile.value = {
+      username: profile.username || '',
+      organization_id: profile.organization_id || '',
+      email: profile.email || ''
+    }
+  } catch (e) {
+    console.error('加载用户资料失败:', e)
+    showWelcome.value = true
+  }
 }
 
 async function loadSessions() {
@@ -154,31 +220,20 @@ async function handleRenameSession(sessionId, newTitle) {
 }
 
 async function handleSendMessage(message, files = [], signal, enableDeepThink = false) {
-  if (!currentSessionId.value) {
-    currentSessionId.value = null
-  }
-
   const userMsgId = `user-${Date.now()}`
 
-  let contentWithFiles = message
-  if (files && files.length > 0) {
-    for (const f of files) {
-      try {
-        if (currentSessionId.value) {
-          await uploadFile(currentSessionId.value, f.file)
-        }
-        contentWithFiles += `\n[文件已上传: ${f.filename}]`
-      } catch (e) {
-        console.error('文件上传失败:', e)
-        contentWithFiles += `\n[文件上传失败: ${f.filename}]`
-      }
-    }
-  }
+  let contentWithFiles = message.trim().replace(/\s+/g, ' ')
 
   const userMessage = {
     id: userMsgId,
     role: 'user',
     content: contentWithFiles,
+    files: files.map(f => ({
+      filename: f.filename,
+      size: f.size,
+      type: f.file.type,
+      file_path: f.file_path || null
+    })),
     created_at: new Date().toISOString()
   }
 
@@ -244,11 +299,18 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
           currentSessionId.value = data.session_id
           const existingIdx = sessions.value.findIndex(s => s.session_id === data.session_id)
           if (existingIdx === -1) {
+            // 使用后端返回的会话标题，如果没有则使用前端生成的标题
+            const sessionTitle = data.title || (message.substring(0, 12) + '...') || '新会话'
             sessions.value.unshift({
               session_id: data.session_id,
-              title: message.substring(0, 5) + '...' || '新会话',
+              title: sessionTitle,
               created_at: new Date().toISOString()
             })
+          } else {
+            // 如果会话已存在，但标题可能已更新，使用后端返回的标题
+            if (data.title) {
+              sessions.value[existingIdx] = { ...sessions.value[existingIdx], title: data.title }
+            }
           }
         }
       } else if (eventType === 'thinking') {
@@ -315,15 +377,20 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
           currentSessionId.value = data.session_id
           const existingIdx = sessions.value.findIndex(s => s.session_id === data.session_id)
           if (existingIdx === -1) {
+            const sessionTitle = data.title || (message.substring(0, 12) + '...') || '新会话'
             sessions.value.unshift({
               session_id: data.session_id,
-              title: message.substring(0, 5) + '...' || '新会话',
+              title: sessionTitle,
               created_at: new Date().toISOString()
             })
+          } else {
+            if (data.title) {
+              sessions.value[existingIdx] = { ...sessions.value[existingIdx], title: data.title }
+            }
           }
         }
       }
-    }, signal, enableDeepThink)
+    }, signal, enableDeepThink, files)
   } catch (e) {
     if (e.name === 'AbortError') {
       return
@@ -347,8 +414,42 @@ function handleStop() {
   }, 2000)
 }
 
-onMounted(() => {
-  loadSessions()
+async function handleRemoveFile(message, messageIndex, file) {
+  try {
+    // 调用后端的删除文件接口
+    await deleteFile(currentSessionId.value, file)
+    
+    // 更新前端的消息列表，移除已删除的文件
+    if (messages.value[messageIndex]) {
+      const updatedMessage = {
+        ...messages.value[messageIndex],
+        files: messages.value[messageIndex].files.filter(f => f.filename !== file.filename)
+      }
+      messages.value.splice(messageIndex, 1, updatedMessage)
+    }
+    
+    // 显示删除成功的提示
+    error.value = '文件删除成功'
+    setTimeout(() => {
+      error.value = null
+    }, 2000)
+  } catch (err) {
+    console.error('文件删除失败:', err)
+    error.value = '文件删除失败'
+    setTimeout(() => {
+      error.value = null
+    }, 2000)
+  }
+}
+
+onMounted(async () => {
+  await loadUserProfile()
+  if (!showWelcome.value) {
+    await loadSessions()
+    if (sessions.value.length > 0) {
+      currentSessionId.value = sessions.value[0].session_id
+    }
+  }
 })
 </script>
 

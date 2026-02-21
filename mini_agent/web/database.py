@@ -62,6 +62,26 @@ class SessionModel(BaseModel):
         return cls(**data)
 
 
+class UserModel(BaseModel):
+    """用户数据模型.
+    
+    Attributes:
+        user_id: 用户唯一标识符
+        username: 用户名
+        organization_id: 机构ID
+        email: 用户邮箱
+        created_at: 创建时间
+        updated_at: 更新时间
+    """
+    
+    user_id: str
+    username: str
+    organization_id: str = ""
+    email: str = ""
+    created_at: str
+    updated_at: str
+
+
 class Database:
     """SQLite3 数据库管理类.
     
@@ -145,6 +165,43 @@ class Database:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_tool_call_session ON tool_call_records(session_id)
             """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS session_files (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    file_type TEXT NOT NULL,
+                    size INTEGER NOT NULL,
+                    uploaded_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+                )
+            """)
+            
+            cursor.execute("PRAGMA table_info(session_files)")
+            columns = [col[1] for col in cursor.fetchall()]
+            if 'username' not in columns:
+                cursor.execute("ALTER TABLE session_files ADD COLUMN username TEXT DEFAULT ''")
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_session_files_session ON session_files(session_id)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_session_files_username ON session_files(username)
+            """)
+            
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id TEXT PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    organization_id TEXT DEFAULT '',
+                    email TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
+            
             conn.commit()
     
     def create_session(self, session_data: SessionModel) -> SessionModel:
@@ -448,6 +505,298 @@ class Database:
                 (result, 1 if success else 0, session_id, message_id, tool_call_id)
             )
             return cursor.rowcount > 0
+
+    def add_session_file(
+        self,
+        session_id: str,
+        filename: str,
+        file_path: str,
+        file_type: str,
+        size: int,
+        username: str = ""
+    ) -> int:
+        """添加会话文件记录.
+
+        Args:
+            session_id: 会话ID
+            filename: 文件名
+            file_path: 文件路径
+            file_type: 文件类型
+            size: 文件大小
+            username: 用户名
+
+        Returns:
+            记录ID
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO session_files (session_id, filename, file_path, file_type, size, uploaded_at, username)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    filename,
+                    file_path,
+                    file_type,
+                    size,
+                    datetime.now().isoformat(),
+                    username
+                )
+            )
+            return cursor.lastrowid
+
+    def get_session_files(self, session_id: str) -> list[dict[str, Any]]:
+        """获取会话文件列表.
+
+        Args:
+            session_id: 会话ID
+
+        Returns:
+            文件列表
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, session_id, filename, file_path, file_type, size, uploaded_at, username
+                FROM session_files
+                WHERE session_id = ?
+                ORDER BY id DESC
+                """,
+                (session_id,)
+            )
+            
+            rows = cursor.fetchall()
+            files = []
+            for row in rows:
+                files.append({
+                    "id": row["id"],
+                    "session_id": row["session_id"],
+                    "filename": row["filename"],
+                    "file_path": row["file_path"],
+                    "file_type": row["file_type"],
+                    "size": row["size"],
+                    "uploaded_at": row["uploaded_at"],
+                    "username": row["username"] or "",
+                })
+            return files
+
+    def get_user_files(self, username: str) -> list[dict[str, Any]]:
+        """获取用户上传的所有文件.
+
+        Args:
+            username: 用户名
+
+        Returns:
+            文件列表
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT sf.id, sf.session_id, sf.filename, sf.file_path, sf.file_type, 
+                       sf.size, sf.uploaded_at, sf.username, s.title as session_title
+                FROM session_files sf
+                LEFT JOIN sessions s ON sf.session_id = s.session_id
+                WHERE sf.username = ?
+                ORDER BY sf.id DESC
+                """,
+                (username,)
+            )
+            
+            rows = cursor.fetchall()
+            files = []
+            for row in rows:
+                files.append({
+                    "id": row["id"],
+                    "session_id": row["session_id"],
+                    "filename": row["filename"],
+                    "file_path": row["file_path"],
+                    "file_type": row["file_type"],
+                    "size": row["size"],
+                    "uploaded_at": row["uploaded_at"],
+                    "username": row["username"] or "",
+                    "session_title": row["session_title"] or "",
+                })
+            return files
+
+    def delete_session_file(self, file_id: int) -> bool:
+        """删除会话文件记录.
+
+        Args:
+            file_id: 文件记录ID
+
+        Returns:
+            是否删除成功
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                DELETE FROM session_files WHERE id = ?
+                """,
+                (file_id,)
+            )
+            return cursor.rowcount > 0
+
+    def create_user(self, user_data: UserModel) -> UserModel:
+        """创建用户.
+
+        Args:
+            user_data: 用户数据对象
+
+        Returns:
+            创建的用户数据对象
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO users (user_id, username, organization_id, email, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_data.user_id,
+                    user_data.username,
+                    user_data.organization_id,
+                    user_data.email,
+                    user_data.created_at,
+                    user_data.updated_at,
+                )
+            )
+        return user_data
+
+    def get_user(self, user_id: str) -> Optional[UserModel]:
+        """获取用户信息.
+
+        Args:
+            user_id: 用户ID
+
+        Returns:
+            用户数据对象，如果不存在则返回None
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT user_id, username, organization_id, email, created_at, updated_at
+                FROM users WHERE user_id = ?
+                """,
+                (user_id,)
+            )
+            row = cursor.fetchone()
+        
+        if row is None:
+            return None
+        
+        return UserModel(
+            user_id=row["user_id"],
+            username=row["username"],
+            organization_id=row["organization_id"] or "",
+            email=row["email"] or "",
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def get_user_by_username(self, username: str) -> Optional[UserModel]:
+        """通过用户名获取用户信息.
+
+        Args:
+            username: 用户名
+
+        Returns:
+            用户数据对象，如果不存在则返回None
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT user_id, username, organization_id, email, created_at, updated_at
+                FROM users WHERE username = ?
+                """,
+                (username,)
+            )
+            row = cursor.fetchone()
+        
+        if row is None:
+            return None
+        
+        return UserModel(
+            user_id=row["user_id"],
+            username=row["username"],
+            organization_id=row["organization_id"] or "",
+            email=row["email"] or "",
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def update_user(self, user_data: UserModel) -> UserModel:
+        """更新用户信息.
+
+        Args:
+            user_data: 用户数据对象
+
+        Returns:
+            更新后的用户数据对象
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT username FROM users WHERE user_id = ?", (user_data.user_id,))
+            row = cursor.fetchone()
+            old_username = row[0] if row else None
+            
+            cursor.execute(
+                """
+                UPDATE users
+                SET username = ?,
+                    organization_id = ?,
+                    email = ?,
+                    updated_at = ?
+                WHERE user_id = ?
+                """,
+                (
+                    user_data.username,
+                    user_data.organization_id,
+                    user_data.email,
+                    user_data.updated_at,
+                    user_data.user_id,
+                )
+            )
+            
+            if old_username and old_username != user_data.username:
+                cursor.execute(
+                    "UPDATE session_files SET username = ? WHERE username = ?",
+                    (user_data.username, old_username)
+                )
+            
+            conn.commit()
+        return user_data
+
+    def get_or_create_default_user(self) -> UserModel:
+        """获取或创建默认用户.
+
+        Returns:
+            默认用户数据对象
+        """
+        import uuid
+        
+        default_user = self.get_user("default")
+        if default_user:
+            return default_user
+        
+        now = datetime.now().isoformat()
+        user_data = UserModel(
+            user_id="default",
+            username="default_user",
+            organization_id="",
+            email="",
+            created_at=now,
+            updated_at=now,
+        )
+        return self.create_user(user_data)
 
 
 _db_instance: Optional[Database] = None

@@ -47,7 +47,7 @@ export async function getChatHistory(sessionId) {
   return { messages: data.messages || [] }
 }
 
-export async function sendMessage(sessionId, message, onChunk, signal, enableDeepThink = false) {
+export async function sendMessage(sessionId, message, onChunk, signal, enableDeepThink = false, files = []) {
   const controller = new AbortController()
   const abortSignal = signal || controller.signal
 
@@ -58,7 +58,8 @@ export async function sendMessage(sessionId, message, onChunk, signal, enableDee
       session_id: sessionId, 
       message, 
       message_id: generateMessageId(),
-      enable_deep_think: enableDeepThink 
+      enable_deep_think: enableDeepThink,
+      files: files
     }),
     signal: abortSignal
   })

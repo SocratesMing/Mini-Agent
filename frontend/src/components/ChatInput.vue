@@ -7,15 +7,22 @@
           :key="index" 
           class="uploaded-file"
         >
-          <div class="file-icon-wrapper">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-            </svg>
+          <div class="file-icon">
+            <FileIcon :filename="file.filename" :size="36" />
           </div>
           <div class="file-info">
             <span class="file-name">{{ file.filename }}</span>
-            <span class="file-size">{{ formatSize(file.size) }}</span>
+            <div class="file-meta">
+              <span class="file-size">{{ formatSize(file.size) }}</span>
+              <div v-if="file.uploadStatus === 'uploading'" class="upload-progress">
+                <div class="progress-bar">
+                  <div class="progress-fill" :style="{ width: file.uploadProgress + '%' }"></div>
+                </div>
+                <span class="progress-text">{{ file.uploadProgress }}%</span>
+              </div>
+              <span v-else-if="file.uploadStatus === 'completed'" class="upload-status completed">上传完成</span>
+              <span v-else-if="file.uploadStatus === 'error'" class="upload-status error">上传失败</span>
+            </div>
           </div>
           <button @click="removeFile(index)" class="remove-file-btn">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -101,13 +108,15 @@
     </div>
     
     <div class="input-footer">
-      <span class="footer-text">CQ-Agent 可能会犯错，请核查重要信息</span>
+      <span class="footer-text">CQ-Agent 信息由AI生成，仅供参考</span>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted, reactive } from 'vue'
+import { uploadFile, deleteFile } from '../api/files.js'
+import FileIcon from './FileIcon.vue'
 
 const props = defineProps({
   disabled: {
@@ -124,7 +133,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['send', 'stop'])
+const emit = defineEmits(['send', 'stop', 'createSession'])
 
 const message = ref('')
 const textareaRef = ref(null)
@@ -146,32 +155,130 @@ async function handleFileSelect(event) {
   const files = Array.from(event.target.files)
   
   for (const file of files) {
-    uploadedFiles.value.push({
+    // 创建文件项
+    const fileItem = {
       file: file,
       filename: file.name,
-      size: file.size
-    })
+      size: file.size,
+      uploadStatus: 'uploading',
+      uploadProgress: 0
+    }
+    
+    // 添加到数组
+    uploadedFiles.value.push(fileItem)
+    
+    // 强制触发初始渲染
+    uploadedFiles.value = [...uploadedFiles.value]
+    
+    try {
+      // 确保会话存在
+      let sessionId = props.sessionId
+      if (!sessionId) {
+        // 通知父组件创建会话
+        const sessionIdPromise = new Promise((resolve) => {
+          // 创建一个临时的监听器来等待会话创建完成
+          const unwatch = watch(
+            () => props.sessionId,
+            (newSessionId) => {
+              if (newSessionId) {
+                unwatch()
+                resolve(newSessionId)
+              }
+            }
+          )
+          // 触发会话创建
+          emit('createSession')
+        })
+        
+        // 等待会话创建完成
+        sessionId = await sessionIdPromise
+        
+        if (!sessionId) {
+          throw new Error('会话创建失败')
+        }
+      }
+      
+      // 调用实际的上传接口
+      const response = await uploadFile(sessionId, file, (progress) => {
+        // 找到对应的文件项并更新进度
+        const index = uploadedFiles.value.findIndex(f => f.file === file)
+        if (index !== -1) {
+          uploadedFiles.value[index].uploadProgress = progress
+          // 强制触发更新
+          uploadedFiles.value = [...uploadedFiles.value]
+        }
+      })
+      
+      // 找到对应的文件项并更新状态
+      const index = uploadedFiles.value.findIndex(f => f.file === file)
+      if (index !== -1) {
+        uploadedFiles.value[index].uploadStatus = 'completed'
+        uploadedFiles.value[index].uploadProgress = 100
+        uploadedFiles.value[index].filePath = response.file_path
+        uploadedFiles.value[index].id = response.id
+        // 强制触发更新
+        uploadedFiles.value = [...uploadedFiles.value]
+      }
+      
+      console.log('文件上传成功:', response)
+    } catch (error) {
+      // 找到对应的文件项并更新状态
+      const index = uploadedFiles.value.findIndex(f => f.file === file)
+      if (index !== -1) {
+        uploadedFiles.value[index].uploadStatus = 'error'
+        // 强制触发更新
+        uploadedFiles.value = [...uploadedFiles.value]
+      }
+      console.error('文件上传失败:', error)
+    }
   }
   
   event.target.value = ''
 }
 
-function removeFile(index) {
+async function removeFile(index) {
+  const file = uploadedFiles.value[index]
+  
+  // 如果文件已经上传成功，调用后台的删除接口
+  if (file && file.uploadStatus === 'completed' && file.id && props.sessionId) {
+    try {
+      await deleteFile(props.sessionId, file)
+      console.log('文件删除成功:', file.filename)
+    } catch (error) {
+      console.error('文件删除失败:', error)
+    }
+  }
+  
+  // 从前端列表中移除文件
   uploadedFiles.value.splice(index, 1)
+  // 强制触发更新
+  uploadedFiles.value = [...uploadedFiles.value]
 }
 
 async function send() {
   if (!canSend.value || props.disabled) return
   
+  // 等待所有文件上传完成
+  const uploadingFiles = uploadedFiles.value.filter(f => f.uploadStatus === 'uploading')
+  if (uploadingFiles.length > 0) {
+    // 显示上传中提示
+    console.log('文件正在上传中，请稍候...')
+    // 可以添加一个loading状态或提示信息
+    return
+  }
+  
   abortController = new AbortController()
   
   const filesToSend = uploadedFiles.value.map(f => ({
+    id: f.id,
     filename: f.filename,
     size: f.size,
-    file: f.file
+    file: f.file,
+    file_path: f.filePath || null,
+    type: f.file?.type || f.fileType || ''
   }))
   
-  emit('send', message.value.trim(), filesToSend, abortController.signal, enableDeepThink.value)
+  emit('send', message.value.trim().replace(/\s+/g, ' '), filesToSend, abortController.signal, enableDeepThink.value)
   
   message.value = ''
   uploadedFiles.value = []
@@ -212,7 +319,7 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   padding: 16px 24px 24px;
-  background: linear-gradient(to top, #ffffff 0%, #f8fafc 100%);
+  background: transparent;
 }
 
 .input-box {
@@ -234,8 +341,8 @@ onUnmounted(() => {
 .uploaded-files {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 16px;
+  gap: 12px;
+  padding: 12px 16px;
   background: #f8fafc;
   border-bottom: 1px solid #f1f5f9;
 }
@@ -246,26 +353,26 @@ onUnmounted(() => {
   gap: 10px;
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  padding: 8px 12px;
+  padding: 10px 14px;
   border-radius: 12px;
-  max-width: 200px;
+  max-width: 250px;
+  flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
 }
 
-.file-icon-wrapper {
-  width: 32px;
-  height: 32px;
-  background: #f1f5f9;
-  border-radius: 8px;
+.uploaded-file:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  border-color: #cbd5e1;
+}
+
+.file-icon {
+  width: 40px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-}
-
-.file-icon-wrapper svg {
-  width: 16px;
-  height: 16px;
-  color: #64748b;
 }
 
 .file-info {
@@ -280,9 +387,15 @@ onUnmounted(() => {
   font-size: 13px;
   font-weight: 500;
   color: #1e293b;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.file-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .file-size {
@@ -290,37 +403,84 @@ onUnmounted(() => {
   color: #64748b;
 }
 
+.upload-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.progress-bar {
+  width: 60px;
+  height: 4px;
+  background: #f1f5f9;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #0ea5e9, #06b6d4);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 10px;
+  color: #64748b;
+  min-width: 35px;
+}
+
+.upload-status {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 8px;
+}
+
+.upload-status.completed {
+  color: #15803d;
+  background: #dcfce7;
+}
+
+.upload-status.error {
+  color: #b91c1c;
+  background: #fee2e2;
+}
+
 .remove-file-btn {
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: transparent;
-  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: #f1f5f9;
+  border: none;
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
   flex-shrink: 0;
 }
 
 .remove-file-btn:hover {
-  background: rgba(14, 165, 233, 0.1);
+  background: #e2e8f0;
+  transform: scale(1.05);
 }
 
 .remove-file-btn svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   color: #64748b;
 }
 
 .remove-file-btn:hover svg {
-  color: #ef4444;
+  color: #dc2626;
 }
 
 .input-row {
   padding: 12px 16px;
-  background: transparent;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
 }
 
 .input-field {

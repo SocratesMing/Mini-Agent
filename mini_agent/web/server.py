@@ -89,6 +89,7 @@ async def lifespan(app: FastAPI):
     def get_tools(enable_file_tools: bool, enable_bash: bool, enable_note: bool) -> list:
         """获取基础工具列表."""
         from mini_agent.tools import BashTool, ReadTool, WriteTool, EditTool, SessionNoteTool
+        from mini_agent.tools.document_tools import DocumentParseTool, DocumentInfoTool
         tools = []
         
         if enable_bash:
@@ -99,6 +100,8 @@ async def lifespan(app: FastAPI):
                 ReadTool(workspace_dir=str(project_root / "workspace")),
                 WriteTool(workspace_dir=str(project_root / "workspace")),
                 EditTool(workspace_dir=str(project_root / "workspace")),
+                DocumentParseTool(),
+                DocumentInfoTool()
             ])
         
         if enable_note:
@@ -172,9 +175,11 @@ app.add_middleware(
 
 from mini_agent.web.routes.sessions import router as sessions_router
 from mini_agent.web.routes.chat import router as chat_router
+from mini_agent.web.routes.user import router as user_router
 
 app.include_router(sessions_router)
 app.include_router(chat_router)
+app.include_router(user_router)
 
 
 @app.get("/", tags=["System"])

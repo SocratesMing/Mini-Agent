@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文件上传状态测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .upload-container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .file-item {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #eee;
+            border-radius: 4px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 10px;
+            background: #f0f0f0;
+            border-radius: 5px;
+            overflow: hidden;
+            margin: 5px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #4CAF50;
+            transition: width 0.3s ease;
+        }
+        .status { 
+            font-size: 12px;
+            color: #666;
+        }
+        .status.completed {
+            color: #4CAF50;
+        }
+        .status.error {
+            color: #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="upload-container">
+        <h2>文件上传状态测试</h2>
+        <input type="file" id="fileInput" multiple>
+        <div id="fileList"></div>
+    </div>
+
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const fileList = document.getElementById('fileList');
+        let files = [];
+
+        fileInput.addEventListener('change', handleFileSelect);
+
+        function handleFileSelect(event) {
+            const selectedFiles = Array.from(event.target.files);
+            
+            selectedFiles.forEach(file => {
+                const fileItem = {
+                    id: Date.now() + Math.random(),
+                    file: file,
+                    filename: file.name,
+                    size: file.size,
+                    uploadStatus: 'uploading',
+                    uploadProgress: 0
+                };
+                
+                files.push(fileItem);
+                renderFileItem(fileItem);
+                simulateUpload(fileItem);
+            });
+
+            event.target.value = '';
+        }
+
+        function renderFileItem(fileItem) {
+            let itemElement = document.getElementById(`file-${fileItem.id}`);
+            
+            if (!itemElement) {
+                itemElement = document.createElement('div');
+                itemElement.id = `file-${fileItem.id}`;
+                itemElement.className = 'file-item';
+                fileList.appendChild(itemElement);
+            }
+
+            itemElement.innerHTML = `
+                <strong>${fileItem.filename}</strong> (${formatSize(fileItem.size)})
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: ${fileItem.uploadProgress}%"></div>
+                </div>
+                <div class="status ${fileItem.uploadStatus}">
+                    ${fileItem.uploadStatus === 'uploading' ? '上传中...' : 
+                      fileItem.uploadStatus === 'completed' ? '上传完成' : '上传失败'}
+                </div>
+            `;
+        }
+
+        function simulateUpload(fileItem) {
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += 10;
+                fileItem.uploadProgress = progress;
+                renderFileItem(fileItem);
+                
+                if (progress >= 100) {
+                    clearInterval(interval);
+                    fileItem.uploadStatus = 'completed';
+                    renderFileItem(fileItem);
+                    console.log('文件上传完成:', fileItem.filename);
+                }
+            }, 200);
+        }
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+    </script>
+</body>
+</html>

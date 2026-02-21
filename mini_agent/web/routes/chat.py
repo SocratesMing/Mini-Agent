@@ -54,32 +54,100 @@ async def chat_stream(
     logger.info(f"[{sid}] session_id: {session_id or '新建'} | message_id: {message_id}")
     logger.info(f"[{sid}] message: {request.message[:100]}{'...' if len(request.message) > 100 else ''} | enable_deep_think: {request.enable_deep_think}")
     
+    # 生成会话标题
+    def generate_session_title(message, files):
+        """生成会话标题
+        
+        Args:
+            message: 用户消息内容
+            files: 用户上传的文件列表
+            
+        Returns:
+            会话标题
+        """
+        # 如果用户输入了消息，使用消息的前12个字符
+        if message and message.strip():
+            title = message.strip()
+            return title[:12] + "..." if len(title) > 12 else title
+        # 如果用户只上传了文件而没有输入消息，使用文件名
+        elif files and len(files) > 0:
+            filename = files[0].get('filename', '文件')
+            return filename[:12] + "..." if len(filename) > 12 else filename
+        # 默认标题
+        else:
+            return "未命名会话"
+    
     if session_id is None:
         session_id = str(uuid.uuid4())
         now = datetime.now().isoformat()
+        session_title = generate_session_title(request.message, request.files)
         session_data = SessionModel(
             session_id=session_id,
-            title=request.message[:5] + "..." if len(request.message) > 5 else request.message,
+            title=session_title,
             messages=[],
             created_at=now,
             updated_at=now,
         )
         db.create_session(session_data)
-        logger.info(f"[{sid}] 新建会话 | 标题: {session_data.title}")
+        logger.info(f"[{sid}] 新建会话 | 标题: {session_title}")
     else:
         session = db.get_session(session_id)
-        if session and len(session.messages) == 0:
-            new_title = request.message[:5] + "..." if len(request.message) > 5 else request.message
-            session.title = new_title
-            logger.info(f"[{sid}] 更新会话标题: {new_title}")
+        if not session:
+            # 如果会话不存在，创建新会话
+            session_id = str(uuid.uuid4())
+            now = datetime.now().isoformat()
+            session_title = generate_session_title(request.message, request.files)
+            session_data = SessionModel(
+                session_id=session_id,
+                title=session_title,
+                messages=[],
+                created_at=now,
+                updated_at=now,
+            )
+            db.create_session(session_data)
+            logger.info(f"[{sid}] 会话不存在，创建新会话 | session_id: {session_id} | 标题: {session_title}")
+        elif len(session.messages) == 0:
+            session_title = generate_session_title(request.message, request.files)
+            session.title = session_title
+            session.updated_at = datetime.now().isoformat()
+            db.update_session(session)
+            logger.info(f"[{sid}] 更新会话标题: {session_title}")
     
     user_message = {
         "role": "user",
         "content": request.message,
         "timestamp": datetime.now().isoformat(),
+        "files": request.files or [],
     }
     db.add_message(session_id, user_message)
     logger.info(f"[{sid}] 保存用户消息到数据库")
+    
+    parsed_content = request.message
+    if request.files and len(request.files) > 0:
+        logger.info(f"[{sid}] 检测到用户上传文件，准备解析...")
+        try:
+            from mini_agent.tools import DocumentParseTool
+            parse_tool = DocumentParseTool()
+            
+            file_contents = []
+            for file_info in request.files:
+                file_path = file_info.get('file_path')
+                if file_path:
+                    logger.info(f"[{sid}] 解析文件: {file_path}")
+                    result = parse_tool.run(file_path)
+                    if result.get('success'):
+                        content = result.get('content', '')
+                        filename = file_info.get('filename', 'unknown')
+                        file_contents.append(f"【文件: {filename}】\n{content}")
+                        logger.info(f"[{sid}] 文件解析成功: {filename} | 长度: {len(content)} 字符")
+                    else:
+                        logger.warning(f"[{sid}] 文件解析失败: {file_path} | 错误: {result.get('content')}")
+            
+            if file_contents:
+                parsed_content = f"{request.message}\n\n--- 文件内容 ---\n\n" + "\n\n---\n\n".join(file_contents)
+                logger.info(f"[{sid}] 文件内容已合并到用户消息 | 总长度: {len(parsed_content)} 字符")
+        except Exception as e:
+            logger.error(f"[{sid}] 文件解析出错: {str(e)}")
     
     logger.info(f"[{sid}] 加载应用配置...")
     
@@ -106,7 +174,7 @@ async def chat_stream(
         raise HTTPException(status_code=500, detail=f"获取LLM客户端失败: {str(e)}")
     
     try:
-        from mini_agent.tools import BashTool, ReadTool, WriteTool, EditTool, SessionNoteTool
+        from mini_agent.tools import BashTool, ReadTool, WriteTool, EditTool, SessionNoteTool, DocumentParseTool, DocumentInfoTool
         from pathlib import Path
         import os
         
@@ -121,6 +189,8 @@ async def chat_stream(
                 ReadTool(workspace_dir=str(project_root / "workspace")),
                 WriteTool(workspace_dir=str(project_root / "workspace")),
                 EditTool(workspace_dir=str(project_root / "workspace")),
+                DocumentParseTool(),
+                DocumentInfoTool()
             ])
         
         if app_config.tools.enable_note:
@@ -172,6 +242,7 @@ async def chat_stream(
             session_id=session_id,
             message_id=message_id,
             http_request=http_request,
+            parsed_content=parsed_content,
         ),
         media_type="text/event-stream",
         headers={

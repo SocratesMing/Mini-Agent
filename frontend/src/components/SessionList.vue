@@ -3,11 +3,7 @@
     <div class="session-header">
       <div class="header-left">
         <div class="logo">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
-            <path d="M2 17l10 5 10-5"></path>
-            <path d="M2 12l10 5 10-5"></path>
-          </svg>
+          <CqLogo :size="28" />
         </div>
         <span class="logo-text">CQ-Agent</span>
       </div>
@@ -113,7 +109,7 @@
         </svg>
       </div>
       <div class="user-info">
-        <div class="user-name">用户</div>
+        <div class="user-name">{{ username || '用户' }}</div>
         <div class="user-status">在线</div>
       </div>
       <svg class="user-arrow" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -129,12 +125,12 @@
             </svg>
           </div>
           <div class="user-dropdown-info">
-            <div class="user-dropdown-name">用户</div>
-            <div class="user-dropdown-email">user@example.com</div>
+            <div class="user-dropdown-name">{{ username || '用户' }}</div>
+            <div class="user-dropdown-email">{{ email || '未设置邮箱' }}</div>
           </div>
         </div>
         <div class="user-dropdown-divider"></div>
-        <button class="user-dropdown-item">
+        <button class="user-dropdown-item" @click="showProfile">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
             <circle cx="12" cy="7" r="4"></circle>
@@ -155,6 +151,9 @@
 
 <script setup>
 import { ref, nextTick, onMounted, onUnmounted } from 'vue'
+import CqLogo from './CqLogo.vue'
+
+const emit = defineEmits(['createSession', 'selectSession', 'deleteSession', 'renameSession', 'toggleSidebar', 'showAssets', 'showProfile'])
 
 const props = defineProps({
   sessions: {
@@ -164,10 +163,16 @@ const props = defineProps({
   currentSessionId: {
     type: String,
     default: null
+  },
+  username: {
+    type: String,
+    default: ''
+  },
+  email: {
+    type: String,
+    default: ''
   }
 })
-
-const emit = defineEmits(['createSession', 'selectSession', 'deleteSession', 'renameSession', 'toggleSidebar', 'showAssets'])
 
 const activeMenu = ref(null)
 const showRenameModal = ref(false)
@@ -231,6 +236,11 @@ onMounted(() => {
 function closeUserMenuSilent() {
   showUserMenu.value = false
 }
+
+function showProfile() {
+  showUserMenu.value = false
+  emit('showProfile')
+}
 </script>
 
 <style scoped>
@@ -259,19 +269,9 @@ function closeUserMenuSilent() {
 }
 
 .logo {
-  width: 32px;
-  height: 32px;
-  background: linear-gradient(135deg, #0ea5e9 0%, #8b5cf6 100%);
-  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.logo svg {
-  width: 18px;
-  height: 18px;
-  color: white;
 }
 
 .logo-text {
