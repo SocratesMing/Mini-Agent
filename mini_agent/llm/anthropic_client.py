@@ -1,5 +1,6 @@
 """Anthropic LLM client implementation."""
 
+import json
 import logging
 from typing import Any, AsyncGenerator
 
@@ -292,7 +293,7 @@ class AnthropicClient(LLMClientBase):
         messages: list[Message],
         tools: list[Any] | None = None,
         enable_deep_think: bool = False,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Generate streaming response from Anthropic LLM.
 
         Args:
@@ -301,15 +302,11 @@ class AnthropicClient(LLMClientBase):
             enable_deep_think: Not supported for Anthropic (ignored)
 
         Yields:
-            Text chunks as they are generated
+            Dict with type and content
         """
-        # Prepare request
         request_params = self._prepare_request(messages, tools)
 
-        # Make streaming API request with retry logic
         if self.retry_config.enabled:
-            # For streaming, we need to handle retry differently
-            # Create a wrapper that yields from the streaming response
             async def streaming_call():
                 return self._make_streaming_request(
                     request_params["system_message"],
@@ -321,28 +318,80 @@ class AnthropicClient(LLMClientBase):
             wrapped_stream = retry_decorator(streaming_call)
             stream_iterator = await wrapped_stream()
         else:
-            # Don't use retry
             stream_iterator = self._make_streaming_request(
                 request_params["system_message"],
                 request_params["api_messages"],
                 request_params["tools"],
             )
 
-        # Parse and yield streaming text
+        content_length = 0
+        thinking_length = 0
+        tool_calls_data = {}
+        event_count = 0
+        
         async for event in stream_iterator:
+            event_count += 1
+            
+            if event_count <= 10:
+                logger.debug(f"[LLM_STREAM] event {event_count}: type={event.type}")
+            
             if event.type == "content_block_delta":
                 if event.delta.type == "text_delta":
-                    yield event.delta.text
+                    content_length += len(event.delta.text)
+                    yield {"type": "content", "content": event.delta.text}
                 elif event.delta.type == "thinking_delta":
-                    yield f"[THINKING]{event.delta.thinking}[/THINKING]"
+                    thinking_length += len(event.delta.thinking)
+                    yield {"type": "thinking", "content": event.delta.thinking}
+                elif event.delta.type == "input_json_delta":
+                    if hasattr(event, 'index'):
+                        idx = event.index
+                        if idx in tool_calls_data:
+                            partial_json = getattr(event.delta, 'partial_json', '')
+                            if isinstance(partial_json, dict):
+                                partial_json = json.dumps(partial_json)
+                            tool_calls_data[idx]["arguments"] += str(partial_json)
+            
             elif event.type == "content_block_start":
                 if hasattr(event, "content_block") and event.content_block:
                     if event.content_block.type == "thinking":
                         if hasattr(event.content_block, "thinking"):
-                            yield f"[THINKING]{event.content_block.thinking}[/THINKING]"
+                            thinking_length += len(event.content_block.thinking)
+                            yield {"type": "thinking", "content": event.content_block.thinking}
                     elif event.content_block.type == "text":
                         if hasattr(event.content_block, "text"):
-                            yield event.content_block.text
+                            content_length += len(event.content_block.text)
+                            yield {"type": "content", "content": event.content_block.text}
+                    elif event.content_block.type == "tool_use":
+                        idx = event.index if hasattr(event, 'index') else len(tool_calls_data)
+                        tool_calls_data[idx] = {
+                            "id": event.content_block.id,
+                            "name": event.content_block.name,
+                            "arguments": ""
+                        }
+                        yield {
+                            "type": "tool_call_start",
+                            "tool_name": event.content_block.name,
+                            "tool_call_id": event.content_block.id
+                        }
+        
+        tool_calls = []
+        for idx, tc in tool_calls_data.items():
+            try:
+                args = json.loads(tc["arguments"]) if tc["arguments"] else {}
+            except json.JSONDecodeError:
+                args = {}
+            tool_calls.append({
+                "id": tc["id"],
+                "name": tc["name"],
+                "arguments": args
+            })
+        
+        logger.info(f"[LLM_STREAM] 流式响应完成")
+        logger.info(f"[LLM_STREAM]   - 内容长度: {content_length}")
+        logger.info(f"[LLM_STREAM]   - 思考内容长度: {thinking_length}")
+        logger.info(f"[LLM_STREAM]   - 工具调用数: {len(tool_calls)}")
+        
+        yield {"type": "done", "tool_calls": tool_calls}
 
     async def generate(
         self,

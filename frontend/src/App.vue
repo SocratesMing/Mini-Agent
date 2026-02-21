@@ -279,10 +279,22 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
       if (data.arguments) currentBlock.arguments = data.arguments
       if (data.result !== undefined) currentBlock.result = data.result
       if (data.success !== undefined) currentBlock.success = data.success
+      if (data.duration !== undefined) currentBlock.duration = data.duration
     }
     const idx = messages.value.findIndex(m => m.id === assistantMsgId)
     if (idx !== -1) {
       messages.value[idx] = { ...messages.value[idx] }
+    }
+  }
+
+  function updateThinkingDuration(duration) {
+    const idx = messages.value.findIndex(m => m.id === assistantMsgId)
+    if (idx !== -1) {
+      const thinkingBlock = messages.value[idx].blocks.find(b => b.type === 'thinking')
+      if (thinkingBlock) {
+        thinkingBlock.duration = duration
+      }
+      messages.value[idx] = { ...messages.value[idx], thinking_duration: duration }
     }
   }
 
@@ -320,6 +332,10 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
         if (idx !== -1) {
           messages.value[idx] = { ...messages.value[idx], thinking: currentThinking }
         }
+      } else if (eventType === 'thinking_end') {
+        if (data.duration) {
+          updateThinkingDuration(data.duration)
+        }
       } else if (eventType === 'content') {
         currentContent += data.content || ''
         addBlock('content', { content: data.content || '' })
@@ -353,6 +369,7 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
             tool_name: data.tool_name || '',
             result: data.result || '',
             success: data.success !== false,
+            duration: data.duration,
             content: data.result || ''
           })
           const idx = messages.value.findIndex(m => m.id === assistantMsgId)
@@ -365,11 +382,16 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
         if (assistantMsgId) {
           const idx = messages.value.findIndex(m => m.id === assistantMsgId)
           if (idx !== -1) {
+            const thinkingBlock = messages.value[idx].blocks.find(b => b.type === 'thinking')
+            if (data.thinking_duration && thinkingBlock) {
+              thinkingBlock.duration = data.thinking_duration
+            }
             messages.value[idx] = {
               ...messages.value[idx],
               content: finalContent,
               created_at: new Date().toISOString(),
-              loading: false
+              loading: false,
+              thinking_duration: data.thinking_duration || messages.value[idx].thinking_duration
             }
           }
         }

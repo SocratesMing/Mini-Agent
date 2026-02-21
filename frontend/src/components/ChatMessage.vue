@@ -46,21 +46,33 @@
           <!-- 思考内容块 -->
           <div v-if="block.type === 'thinking'" class="thinking-block">
             <div class="thinking-header" @click="toggleThinking(index)">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: isExpandedThinking(index) }">
+              <svg class="thinking-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M12 16v-4M12 8h.01"></path>
+                <path d="M9.5 9.5c.5-.5 1.5-1 2.5-1s2 .5 2.5 1c.5.5.5 1.5 0 2.5-.5.5-1.5 1-2.5 1"></path>
+              </svg>
+              <span class="thinking-title">思考过程</span>
+              <span v-if="block.duration !== undefined" class="thinking-duration">用时 {{ block.duration }} 秒</span>
+              <svg class="toggle-arrow" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: isExpandedThinking(index) }">
                 <polyline points="6 9 12 15 18 9"></polyline>
               </svg>
-              <span>思考过程</span>
             </div>
-            <div v-if="isExpandedThinking(index)" class="thinking-content">{{ block.content }}</div>
+            <div v-if="isExpandedThinking(index)" class="thinking-content">
+              <div class="thinking-quote" v-html="renderMarkdown('> ' + block.content.replace(/\n/g, '\n> '))"></div>
+            </div>
           </div>
 
           <!-- 工具调用块 -->
           <div v-if="block.type === 'tool_call'" class="tool-call-block">
             <div class="tool-call-header" @click="toggleToolCall(index)">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: expandedToolCall[index] }">
+              <svg class="tool-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+              </svg>
+              <span class="tool-title">工具调用</span>
+              <span class="tool-name-badge">{{ block.tool_name }}</span>
+              <svg class="toggle-arrow" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: expandedToolCall[index] }">
                 <polyline points="6 9 12 15 18 9"></polyline>
               </svg>
-              <span>工具调用: {{ block.tool_name }}</span>
             </div>
             <div v-if="expandedToolCall[index]" class="tool-call-args">
               <pre>{{ formatJson(block.arguments) }}</pre>
@@ -70,12 +82,26 @@
           <!-- 工具结果块 -->
           <div v-if="block.type === 'tool_result'" class="tool-result-block" :class="{ error: !block.success }">
             <div class="tool-result-header" @click="toggleToolResult(index)">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: expandedToolResult[index] }">
+              <svg class="tool-icon" :class="{ success: block.success, error: !block.success }" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <template v-if="block.success">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                  <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </template>
+                <template v-else>
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="15" y1="9" x2="9" y2="15"></line>
+                  <line x1="9" y1="9" x2="15" y2="15"></line>
+                </template>
+              </svg>
+              <span class="tool-title">{{ block.success ? '执行成功' : '执行失败' }}</span>
+              <span v-if="block.duration !== undefined" class="tool-duration">用时 {{ block.duration }} 秒</span>
+              <svg class="toggle-arrow" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: expandedToolResult[index] }">
                 <polyline points="6 9 12 15 18 9"></polyline>
               </svg>
-              <span>{{ block.success ? '工具结果' : '工具错误' }}</span>
             </div>
-            <div v-if="expandedToolResult[index]" class="tool-result-content">{{ truncateResult(block.result) }}</div>
+            <div v-if="expandedToolResult[index]" class="tool-result-content">
+              <pre>{{ truncateResult(block.result) }}</pre>
+            </div>
           </div>
 
           <!-- 内容块 -->
@@ -87,12 +113,20 @@
       <template v-else>
         <div v-if="message.thinking" class="thinking-block">
           <div class="thinking-header" @click="showThinking = !showThinking">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: showThinking }">
+            <svg class="thinking-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M12 16v-4M12 8h.01"></path>
+              <path d="M9.5 9.5c.5-.5 1.5-1 2.5-1s2 .5 2.5 1c.5.5.5 1.5 0 2.5-.5.5-1.5 1-2.5 1"></path>
+            </svg>
+            <span class="thinking-title">思考过程</span>
+            <span v-if="message.thinking_duration !== undefined" class="thinking-duration">用时 {{ message.thinking_duration }} 秒</span>
+            <svg class="toggle-arrow" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ rotated: showThinking }">
               <polyline points="6 9 12 15 18 9"></polyline>
             </svg>
-            <span>思考过程</span>
           </div>
-          <div v-if="showThinking" class="thinking-content">{{ message.thinking }}</div>
+          <div v-if="showThinking" class="thinking-content">
+            <div class="thinking-quote" v-html="renderMarkdown('> ' + message.thinking.replace(/\n/g, '\n> '))"></div>
+          </div>
         </div>
 
         <div v-if="message.tool_calls && message.tool_calls.length > 0" class="tool-calls-block">
@@ -147,7 +181,7 @@ const props = defineProps({
 
 const emit = defineEmits(['removeFile'])
 
-const showThinking = ref(false)
+const showThinking = ref(true)
 const expandedThinking = ref({})
 const expandedToolCall = ref({})
 const expandedToolResult = ref({})
@@ -183,7 +217,7 @@ const sortedBlocks = computed(() => {
 })
 
 function isExpandedThinking(index) {
-  return expandedThinking.value[index] === true
+  return expandedThinking.value[index] !== false
 }
 
 function toggleThinking(index) {
@@ -507,90 +541,174 @@ onMounted(() => {
 
 
 .thinking-block {
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  margin-bottom: 12px;
   width: 100%;
-  background: #fef3c7;
-  border: 1px solid #fcd34d;
-  border-radius: 10px;
-  overflow: hidden;
 }
 
 .thinking-header {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 8px 12px;
-  background: #fef08a;
+  background: transparent;
+  border-radius: 8px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
-  color: #92400e;
+  color: #475569;
   user-select: none;
   transition: background 0.2s;
+  align-self: flex-start;
 }
 
 .thinking-header:hover {
-  background: #fde047;
+  background: #f1f5f9;
 }
 
-.thinking-header svg {
+.thinking-icon {
+  width: 16px;
+  height: 16px;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.thinking-title {
+  flex: 1;
+}
+
+.thinking-duration {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 400;
+}
+
+.toggle-arrow {
   width: 14px;
   height: 14px;
   transition: transform 0.2s;
+  color: #64748b;
+  flex-shrink: 0;
 }
 
-.thinking-header svg.rotated {
+.toggle-arrow.rotated {
   transform: rotate(180deg);
 }
 
 .thinking-content {
-  padding: 10px 12px;
+  padding: 12px 14px;
+  font-size: 15px;
+  color: #475569;
+  line-height: 1.7;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.thinking-quote {
+  border-left: 3px solid #cbd5e1;
+  padding-left: 16px;
+  color: #64748b;
+}
+
+.thinking-quote :deep(p) {
+  margin: 0 0 8px 0;
+}
+
+.thinking-quote :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.thinking-quote :deep(ol),
+.thinking-quote :deep(ul) {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.thinking-quote :deep(li) {
+  margin: 4px 0;
+}
+
+.thinking-quote :deep(code) {
+  background: #e2e8f0;
+  padding: 2px 6px;
+  border-radius: 4px;
   font-size: 12px;
-  color: #78350f;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
+  color: #475569;
 }
 
 .tool-call-block {
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  margin-bottom: 8px;
   width: 100%;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  border-radius: 10px;
-  overflow: hidden;
 }
 
 .tool-call-header {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 8px 12px;
-  background: #dcfce7;
-  font-size: 12px;
+  background: transparent;
+  border-radius: 8px;
+  font-size: 13px;
   font-weight: 500;
-  color: #166534;
+  color: #475569;
   cursor: pointer;
   user-select: none;
   transition: background 0.2s;
+  align-self: flex-start;
 }
 
 .tool-call-header:hover {
-  background: #bbf7d0;
+  background: #f1f5f9;
 }
 
-.tool-call-header svg {
-  width: 14px;
-  height: 14px;
-  transition: transform 0.2s;
+.tool-icon {
+  width: 16px;
+  height: 16px;
+  color: #64748b;
+  flex-shrink: 0;
 }
 
-.tool-call-header svg.rotated {
-  transform: rotate(180deg);
+.tool-icon.success {
+  color: #22c55e;
+}
+
+.tool-icon.error {
+  color: #ef4444;
+}
+
+.tool-title {
+  color: #475569;
+}
+
+.tool-name-badge {
+  background: #e0f2fe;
+  color: #0369a1;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.tool-duration {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 400;
 }
 
 .tool-call-args {
-  padding: 8px 12px;
-  font-size: 11px;
+  padding: 12px 14px;
+  font-size: 12px;
   color: #64748b;
+  width: 100%;
+  box-sizing: border-box;
+  background: #f8fafc;
+  border-radius: 8px;
+  margin-top: 4px;
 }
 
 .tool-call-args pre {
@@ -600,116 +718,127 @@ onMounted(() => {
 }
 
 .tool-result-block {
-  width: 100%;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.tool-result-block.error {
-  background: #fef2f2;
-  border-color: #fecaca;
-}
-
-.tool-result-header {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: #dcfce7;
-  font-size: 12px;
-  font-weight: 500;
-  color: #166534;
-  cursor: pointer;
-  user-select: none;
-  transition: background 0.2s;
-}
-
-.tool-result-header:hover {
-  background: #bbf7d0;
+  flex-direction: column;
+  background: transparent;
+  margin-bottom: 8px;
+  width: 100%;
 }
 
 .tool-result-block.error .tool-result-header {
-  background: #fee2e2;
   color: #dc2626;
 }
 
+.tool-result-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: transparent;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #475569;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.2s;
+  align-self: flex-start;
+}
+
+.tool-result-header:hover {
+  background: #f1f5f9;
+}
+
 .tool-result-block.error .tool-result-header:hover {
-  background: #fecaca;
-}
-
-.tool-result-header svg {
-  width: 14px;
-  height: 14px;
-  transition: transform 0.2s;
-}
-
-.tool-result-header svg.rotated {
-  transform: rotate(180deg);
+  background: #fef2f2;
 }
 
 .tool-result-content {
-  padding: 8px 12px;
-  font-size: 11px;
-  color: #166534;
+  padding: 12px 14px;
+  font-size: 12px;
+  color: #475569;
+  width: 100%;
+  box-sizing: border-box;
+  background: #f8fafc;
+  border-radius: 8px;
+  margin-top: 4px;
+}
+
+.tool-result-block.error .tool-result-content {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.tool-result-content pre {
+  margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
 }
 
-.tool-result-block.error .tool-result-content {
-  color: #dc2626;
+.toggle-arrow {
+  width: 14px;
+  height: 14px;
+  transition: transform 0.2s;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.toggle-arrow.rotated {
+  transform: rotate(180deg);
 }
 
 .tool-calls-block {
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  margin-bottom: 8px;
   width: 100%;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  border-radius: 10px;
-  overflow: hidden;
 }
 
 .tool-calls-header {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 8px 12px;
-  background: #dcfce7;
-  font-size: 12px;
+  background: transparent;
+  border-radius: 8px;
+  font-size: 13px;
   font-weight: 500;
-  color: #166534;
+  color: #475569;
+  align-self: flex-start;
 }
 
 .tool-calls-header svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
+  color: #64748b;
 }
 
 .tool-calls-list {
-  padding: 8px 12px;
+  padding: 8px 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: 100%;
 }
 
 .tool-call-item {
-  background: white;
-  border-radius: 6px;
-  padding: 8px 10px;
-  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 10px 14px;
 }
 
 .tool-name {
-  font-weight: 600;
+  font-weight: 500;
   font-size: 13px;
-  color: #0d9488;
-  margin-bottom: 4px;
+  color: #0369a1;
+  margin-bottom: 6px;
 }
 
 .tool-args {
-  font-size: 11px;
+  font-size: 12px;
   color: #64748b;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .tool-args pre {
@@ -719,12 +848,12 @@ onMounted(() => {
 }
 
 .tool-result {
-  font-size: 11px;
+  font-size: 12px;
   color: #166534;
   background: #f0fdf4;
-  padding: 6px 8px;
-  border-radius: 4px;
-  margin-top: 4px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-top: 6px;
 }
 
 .tool-result.error {
@@ -851,39 +980,39 @@ onMounted(() => {
 }
 
 .message.user .message-text {
-  background: #0ea5e9;
-  color: white;
+  background: #f0f9ff;
+  color: #1e293b;
   border-radius: 16px;
 }
 
 .message.user .message-text :deep(pre) {
-  background: rgba(0, 0, 0, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(30, 41, 59, 0.08);
+  border: 1px solid rgba(30, 41, 59, 0.15);
 }
 
 .message.user .message-text :deep(blockquote) {
-  border-left-color: rgba(255, 255, 255, 0.5);
+  border-left-color: rgba(30, 41, 59, 0.2);
 }
 
 .message.user .message-text :deep(table) {
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(30, 41, 59, 0.15);
 }
 
 .message.user .message-text :deep(th),
 .message.user .message-text :deep(td) {
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: rgba(30, 41, 59, 0.15);
 }
 
 .message.user .message-text :deep(th) {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(30, 41, 59, 0.06);
 }
 
 .message.user .message-text :deep(tr:nth-child(even)) {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(30, 41, 59, 0.03);
 }
 
 .message.user .message-text :deep(tr:hover) {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(30, 41, 59, 0.06);
 }
 
 .message-actions {

@@ -140,8 +140,11 @@ async def chat_stream_generator(
     full_response = ""
     thinking_content = None
     thinking_started = False
+    thinking_start_time = None
+    thinking_duration_value = None
     assistant_started = False
     tool_calls_count = 0
+    tool_call_start_times = {}
     
     content_blocks = []
     block_order = 0
@@ -191,10 +194,16 @@ async def chat_stream_generator(
             
             if event_type == "thinking_start":
                 thinking_started = True
+                thinking_start_time = time.time()
             elif event_type == "thinking":
                 content = event.get("content", "")
                 thinking_content = (thinking_content or "") + content
                 yield f"data: {json.dumps({'type': 'thinking', 'content': content}, ensure_ascii=False)}\n\n"
+            elif event_type == "thinking_end":
+                thinking_duration = event.get("duration")
+                if thinking_duration:
+                    thinking_duration_value = thinking_duration
+                    logger.info(f"[{sid}] 思考完成 | 耗时: {thinking_duration}s")
             elif event_type == "assistant_start":
                 assistant_started = True
                 yield f"data: {json.dumps({'type': 'assistant_start', 'content': ''}, ensure_ascii=False)}\n\n"
@@ -209,6 +218,7 @@ async def chat_stream_generator(
                 arguments = event.get("arguments", {})
                 tool_call_id = event.get("tool_call_id", "")
                 tool_calls_count += 1
+                tool_call_start_times[tool_call_id] = time.time()
                 logger.info(f"[{sid}] 工具调用: tool_name={tool_name} | tool_call_id={tool_call_id}")
                 logger.info(f"[{sid}] 工具参数: {json.dumps(arguments, ensure_ascii=False)[:200]}")
                 
@@ -238,7 +248,9 @@ async def chat_stream_generator(
                 success = event.get("success", False)
                 result = event.get("result", "")
                 tool_call_id = event.get("tool_call_id", "")
-                logger.info(f"[{sid}] 工具结果: tool_name={tool_name} | success={success}")
+                tool_duration = event.get("duration")
+                
+                logger.info(f"[{sid}] 工具结果: tool_name={tool_name} | success={success} | duration={tool_duration}s")
                 logger.info(f"[{sid}] 工具结果内容: {str(result)[:100]}{'...' if len(str(result)) > 100 else ''}")
                 
                 if tool_call_id:
@@ -258,19 +270,24 @@ async def chat_stream_generator(
                     "result": result,
                     "success": success,
                     "tool_call_id": tool_call_id,
+                    "duration": tool_duration,
                     "order": block_order,
                 })
                 block_order += 1
-                yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': tool_name, 'success': success, 'result': result, 'tool_call_id': tool_call_id}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': tool_name, 'success': success, 'result': result, 'tool_call_id': tool_call_id, 'duration': tool_duration}, ensure_ascii=False)}\n\n"
             elif event_type == "done":
                 add_content_block()
                 event_thinking = event.get("thinking", None)
                 if event_thinking:
                     thinking_content = event_thinking
+                
                 steps = event.get("steps", 1)
                 tool_calls = event.get("tool_calls", 0)
                 
-                logger.info(f"[{sid}] 思考完成 | 长度: {len(thinking_content) if thinking_content else 0}")
+                if thinking_duration_value is None and thinking_start_time and thinking_content:
+                    thinking_duration_value = round(time.time() - thinking_start_time, 1)
+                
+                logger.info(f"[{sid}] 思考完成 | 长度: {len(thinking_content) if thinking_content else 0} | 用时: {thinking_duration_value}s")
                 if thinking_content:
                     logger.info(f"[{sid}] 思考内容全文:\n{thinking_content}")
                 logger.info(f"[{sid}] 正式内容完成 | 长度: {len(full_response)}")
@@ -281,6 +298,7 @@ async def chat_stream_generator(
                     thinking_block = {
                         "type": "thinking",
                         "content": thinking_content,
+                        "duration": thinking_duration_value,
                         "order": 0,
                     }
                     content_blocks.insert(0, thinking_block)
@@ -292,6 +310,7 @@ async def chat_stream_generator(
                     "content": full_response,
                     "timestamp": datetime.now().isoformat(),
                     "thinking": thinking_content,
+                    "thinking_duration": thinking_duration_value,
                     "blocks": content_blocks
                 }
                 
@@ -305,7 +324,9 @@ async def chat_stream_generator(
                     'message_id': message_id, 
                     'content': full_response, 
                     'steps': steps, 
-                    'tool_calls': tool_calls
+                    'tool_calls': tool_calls,
+                    'thinking': thinking_content,
+                    'thinking_duration': thinking_duration_value
                 }
                 logger.info(f"[{sid}] 发送事件: done")
                 yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"

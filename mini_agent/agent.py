@@ -12,7 +12,7 @@ import tiktoken
 
 from .llm import LLMClient
 from .logger import AgentLogger
-from .schema import LLMResponse, Message
+from .schema import FunctionCall, LLMResponse, Message, ToolCall
 from .tools.base import Tool, ToolResult
 from .utils import calculate_display_width
 
@@ -484,66 +484,93 @@ Requirements:
 
             llm_start_time = time.time()
             logger.info(f"[{sid}] 开始LLM流式生成...")
+            thinking_start_time = None
             
             try:
                 chunk_count = 0
+                collected_tool_calls = []
+                
                 async for chunk in self.llm.stream_generate(messages=self.messages, tools=tool_list, enable_deep_think=enable_deep_think):
                     chunk_count += 1
-                    if "[THINKING]" in chunk and "[/THINKING]" in chunk:
-                        thinking_text = chunk.replace("[THINKING]", "").replace("[/THINKING]", "")
+                    chunk_type = chunk.get("type", "")
+                    
+                    if chunk_type == "thinking":
                         if not thinking_started:
                             thinking_started = True
+                            thinking_start_time = time.time()
                             yield {"type": "thinking_start", "content": ""}
-                        thinking_content = (thinking_content or "") + thinking_text
-                        yield {"type": "thinking", "content": thinking_text}
-                    else:
-                        if chunk and not assistant_started:
+                        thinking_content = (thinking_content or "") + chunk.get("content", "")
+                        yield {"type": "thinking", "content": chunk.get("content", "")}
+                    
+                    elif chunk_type == "content":
+                        content = chunk.get("content", "")
+                        if content and not assistant_started:
                             assistant_started = True
+                            if thinking_start_time:
+                                thinking_duration = round(time.time() - thinking_start_time, 1)
+                                yield {"type": "thinking_end", "duration": thinking_duration}
                             yield {"type": "assistant_start", "content": ""}
-                        if chunk:
-                            full_response += chunk
-                            yield {"type": "content", "content": chunk}
+                        if content:
+                            full_response += content
+                            yield {"type": "content", "content": content}
+                    
+                    elif chunk_type == "tool_call_start":
+                        tool_name = chunk.get("tool_name", "")
+                        tool_call_id = chunk.get("tool_call_id", "")
+                        logger.info(f"[{sid}] 工具调用开始: tool_name={tool_name} | tool_call_id={tool_call_id}")
+                    
+                    elif chunk_type == "done":
+                        collected_tool_calls = chunk.get("tool_calls", [])
 
-                logger.info(f"[{sid}] LLM流式生成完成，共 {chunk_count} 个片段 | 耗时: {time.time() - llm_start_time:.2f}s")
-
+                llm_elapsed = time.time() - llm_start_time
+                logger.info(f"[{sid}] LLM流式生成完成，共 {chunk_count} 个片段 | 耗时: {llm_elapsed:.2f}s")
+                logger.info(f"[{sid}]   - 内容长度: {len(full_response)}")
                 if thinking_content:
-                    logger.info(f"[{sid}] 思考内容长度: {len(thinking_content)}")
+                    logger.info(f"[{sid}]   - 思考内容长度: {len(thinking_content)}")
+                if collected_tool_calls:
+                    logger.info(f"[{sid}]   - 工具调用数: {len(collected_tool_calls)}")
 
-                logger.info(f"[{sid}] 获取完整LLM响应...")
-                response = await self.llm.generate(messages=self.messages, tools=tool_list, enable_deep_think=enable_deep_think)
-
-                if response.usage:
-                    self.api_total_tokens = response.usage.total_tokens
-                    logger.info(f"[{sid}] Token使用: prompt={response.usage.prompt_tokens}, completion={response.usage.completion_tokens}, total={response.usage.total_tokens}")
+                tool_calls_for_msg = None
+                if collected_tool_calls:
+                    tool_calls_for_msg = [
+                        ToolCall(
+                            id=tc["id"],
+                            type="function",
+                            function=FunctionCall(
+                                name=tc["name"],
+                                arguments=tc["arguments"],
+                            ),
+                        )
+                        for tc in collected_tool_calls
+                    ]
 
                 self.logger.log_response(
-                    content=response.content,
-                    thinking=response.thinking,
-                    tool_calls=response.tool_calls,
-                    finish_reason=response.finish_reason,
+                    content=full_response,
+                    thinking=thinking_content or None,
+                    tool_calls=tool_calls_for_msg,
+                    finish_reason="stop",
                 )
 
                 assistant_msg = Message(
                     role="assistant",
-                    content=response.content,
-                    thinking=response.thinking,
-                    tool_calls=response.tool_calls,
+                    content=full_response,
+                    thinking=thinking_content or None,
+                    tool_calls=tool_calls_for_msg,
                 )
                 self.messages.append(assistant_msg)
                 logger.info(f"[{sid}] 助手消息已添加到上下文")
 
-                if not response.tool_calls:
+                if not collected_tool_calls:
                     step_elapsed = perf_counter() - step_start_time
                     total_elapsed = perf_counter() - run_start_time
                     print(f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}")
                     logger.info(f"[{sid}] 步骤 {step + 1} 完成，无工具调用 | 耗时: {step_elapsed:.2f}s | 总耗时: {total_elapsed:.2f}s")
-                    final_thinking = thinking_content or response.thinking
-                    if final_thinking:
-                        logger.info(f"[{sid}] 最终思考内容长度: {len(final_thinking)}")
+                    if thinking_content:
+                        logger.info(f"[{sid}] 最终思考内容长度: {len(thinking_content)}")
                     yield {
                         "type": "done",
-                        "content": response.content,
-                        "thinking": final_thinking,
+                        "content": full_response,
+                        "thinking": thinking_content,
                         "steps": step + 1,
                         "tool_calls": 0,
                     }
@@ -556,12 +583,12 @@ Requirements:
                     yield {"type": "error", "content": "Task cancelled by user."}
                     return
 
-                logger.info(f"[{sid}] 检测到 {len(response.tool_calls)} 个工具调用")
+                logger.info(f"[{sid}] 检测到 {len(collected_tool_calls)} 个工具调用")
                 
-                for tool_call in response.tool_calls:
-                    tool_call_id = tool_call.id
-                    function_name = tool_call.function.name
-                    arguments = tool_call.function.arguments
+                for tool_call in collected_tool_calls:
+                    tool_call_id = tool_call["id"]
+                    function_name = tool_call["name"]
+                    arguments = tool_call["arguments"]
 
                     logger.info(f"[{sid}] 执行工具调用: tool_name={function_name} | tool_call_id={tool_call_id}")
                     logger.info(f"[{sid}] 工具参数: {json.dumps(arguments, ensure_ascii=False)}")
@@ -631,6 +658,7 @@ Requirements:
                         "success": result.success,
                         "result": result.content if result.success else result.error,
                         "tool_call_id": tool_call_id,
+                        "duration": round(time.time() - tool_start_time, 1),
                     }
 
                     if result.success:
