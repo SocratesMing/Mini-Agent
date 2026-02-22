@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from typing import Any, AsyncGenerator
 
 from openai import AsyncOpenAI
@@ -64,65 +65,25 @@ class OpenAIClient(LLMClientBase):
         Raises:
             Exception: API call failed
         """
-        logger.info("=" * 80)
-        logger.info("[LLM] 开始API请求")
-        logger.info("-" * 80)
-        logger.info(f"[LLM] 请求参数:")
-        logger.info(f"[LLM]   - model: {self.model}")
-        logger.info(f"[LLM]   - api_base: {self.client.base_url}")
-        logger.info(f"[LLM]   - enable_deep_think: {enable_deep_think}")
-        logger.info(f"[LLM]   - messages_count: {len(api_messages)}")
-        
-        for i, msg in enumerate(api_messages):
-            role = msg.get("role", "unknown")
-            content = msg.get("content", "")
-            if isinstance(content, str):
-                content_preview = content[:100] + "..." if len(content) > 100 else content
-            else:
-                content_preview = str(content)[:100] + "..."
-            logger.info(f"[LLM]   - message[{i}]: role={role}, content={content_preview}")
-        
-        if tools:
-            logger.info(f"[LLM]   - tools_count: {len(tools)}")
-            for i, tool in enumerate(tools):
-                if isinstance(tool, dict) and "function" in tool:
-                    tool_name = tool["function"].get("name", "unknown")
-                elif hasattr(tool, "name"):
-                    tool_name = tool.name
-                else:
-                    tool_name = "unknown"
-                logger.info(f"[LLM]     - tool[{i}]: {tool_name}")
+        logger.info(f"开始API请求 | model={self.model} | messages={len(api_messages)} | deep_think={enable_deep_think}")
         
         params = {
             "model": self.model,
             "messages": api_messages,
         }
 
-        # MiniMax API: 使用reasoning_enabled参数控制思考内容
         if enable_deep_think:
             params["extra_body"] = {"reasoning_split": True}
-            logger.info(f"[LLM]   - extra_body: reasoning_split=True")
         else:
-            # 禁用思考内容
             params["extra_body"] = {"reasoning_enabled": False}
-            logger.info(f"[LLM]   - extra_body: reasoning_enabled=False")
 
         if tools:
             params["tools"] = self._convert_tools(tools)
 
-        logger.info(f"[LLM] 发送请求到API...")
         response = await self.client.chat.completions.create(**params)
         
-        logger.info(f"[LLM] 收到API响应")
         if hasattr(response, 'usage') and response.usage:
-            logger.info(f"[LLM]   - usage: prompt_tokens={response.usage.prompt_tokens}, completion_tokens={response.usage.completion_tokens}, total_tokens={response.usage.total_tokens}")
-        if response.choices and len(response.choices) > 0:
-            msg = response.choices[0].message
-            content_preview = (msg.content or "")[:100] + "..." if msg.content and len(msg.content) > 100 else msg.content
-            logger.info(f"[LLM]   - content_preview: {content_preview}")
-            if msg.tool_calls:
-                logger.info(f"[LLM]   - tool_calls_count: {len(msg.tool_calls)}")
-        logger.info("-" * 80)
+            logger.info(f"API响应 | prompt={response.usage.prompt_tokens} | completion={response.usage.completion_tokens} | total={response.usage.total_tokens}")
         
         return response
 
@@ -206,13 +167,9 @@ class OpenAIClient(LLMClientBase):
                         )
                     assistant_msg["tool_calls"] = tool_calls_list
 
-                # IMPORTANT: Add reasoning_details if thinking is present
-                # This is CRITICAL for Interleaved Thinking to work properly!
-                # The complete response_message (including reasoning_details) must be
-                # preserved in Message History and passed back to the model in the next turn.
-                # This ensures the model's chain of thought is not interrupted.
+                # DeepSeek thinking mode: add reasoning_content for tool calls
                 if msg.thinking:
-                    assistant_msg["reasoning_details"] = [{"text": msg.thinking}]
+                    assistant_msg["reasoning_content"] = msg.thinking
 
                 api_messages.append(assistant_msg)
 
@@ -351,7 +308,7 @@ class OpenAIClient(LLMClientBase):
         messages: list[Message],
         tools: list[Any] | None = None,
         enable_deep_think: bool = False,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Stream generate response from OpenAI LLM.
 
         Args:
@@ -360,83 +317,120 @@ class OpenAIClient(LLMClientBase):
             enable_deep_think: Whether to enable deep thinking mode
 
         Yields:
-            Text chunks as they are generated
+            Dict with type and content
         """
-        logger.info("=" * 80)
-        logger.info("[LLM_STREAM] 开始流式API请求")
-        logger.info("-" * 80)
-        
         _, api_messages = self._convert_messages(messages)
+        logger.info(f"model={self.model} | messages={len(api_messages)} | deep_think={enable_deep_think}")
         
-        logger.info(f"[LLM_STREAM] 请求参数:")
-        logger.info(f"[LLM_STREAM]   - model: {self.model}")
-        logger.info(f"[LLM_STREAM]   - api_base: {self.client.base_url}")
-        logger.info(f"[LLM_STREAM]   - enable_deep_think: {enable_deep_think}")
-        logger.info(f"[LLM_STREAM]   - messages_count: {len(api_messages)}")
-        
-        for i, msg in enumerate(api_messages):
-            role = msg.get("role", "unknown")
-            content = msg.get("content", "")
-            if isinstance(content, str):
-                content_preview = content[:100] + "..." if len(content) > 100 else content
-            else:
-                content_preview = str(content)[:100] + "..."
-            logger.info(f"[LLM_STREAM]   - message[{i}]: role={role}, content={content_preview}")
-        
-        if tools:
-            logger.info(f"[LLM_STREAM]   - tools_count: {len(tools)}")
-            for i, tool in enumerate(tools):
-                if isinstance(tool, dict) and "function" in tool:
-                    tool_name = tool["function"].get("name", "unknown")
-                elif hasattr(tool, "name"):
-                    tool_name = tool.name
-                else:
-                    tool_name = "unknown"
-                logger.info(f"[LLM_STREAM]     - tool[{i}]: {tool_name}")
-
         params = {
             "model": self.model,
             "messages": api_messages,
             "stream": True,
         }
 
-        # MiniMax API: 使用reasoning_enabled参数控制思考内容
         if enable_deep_think:
             params["extra_body"] = {"reasoning_split": True}
-            logger.info(f"[LLM_STREAM]   - extra_body: reasoning_split=True")
         else:
-            # 禁用思考内容
             params["extra_body"] = {"reasoning_enabled": False}
-            logger.info(f"[LLM_STREAM]   - extra_body: reasoning_enabled=False")
 
         if tools:
             params["tools"] = self._convert_tools(tools)
 
-        logger.info(f"[LLM_STREAM] 发送流式请求到API...")
         response_stream = await self.client.chat.completions.create(**params)
 
-        logger.info(f"[LLM_STREAM] 开始接收流式响应...")
         chunk_count = 0
         content_length = 0
         thinking_length = 0
+        tool_calls_data = {}
+        thinking_started = False
+        thinking_start_time = None
+        thinking_duration_value = None
+        full_thinking = ""
+        full_content = ""
         
         async for chunk in response_stream:
             if chunk.choices and len(chunk.choices) > 0:
                 delta = chunk.choices[0].delta
-                if delta:
-                    if delta.content:
-                        chunk_count += 1
-                        content_length += len(delta.content)
-                        yield delta.content
-                    # 只有启用深度思考时才处理思考内容
-                    if enable_deep_think and hasattr(delta, "reasoning_details") and delta.reasoning_details:
-                        for detail in delta.reasoning_details:
-                            if hasattr(detail, "text"):
-                                thinking_length += len(detail.text)
-                                yield f"[THINKING]{detail.text}[/THINKING]"
+                
+                if enable_deep_think and hasattr(delta, "reasoning_content") and delta.reasoning_content:
+                    if not thinking_started:
+                        thinking_started = True
+                        thinking_start_time = time.time()
+                        logger.info(f"思考开始")
+                        yield {"type": "thinking_start", "content": ""}
+                    thinking_length += len(delta.reasoning_content)
+                    full_thinking += delta.reasoning_content
+                    yield {"type": "thinking", "content": delta.reasoning_content}
+                
+                if delta.content:
+                    if thinking_started and thinking_start_time:
+                        thinking_duration_value = round(time.time() - thinking_start_time, 1)
+                        logger.info(f"思考结束 | 用时: {thinking_duration_value}s")
+                        yield {"type": "thinking_end", "duration": thinking_duration_value}
+                        thinking_started = False
+                    chunk_count += 1
+                    content_length += len(delta.content)
+                    full_content += delta.content
+                    yield {"type": "content", "content": delta.content}
+                
+                if hasattr(delta, "tool_calls") and delta.tool_calls:
+                    for tool_call in delta.tool_calls:
+                        idx = tool_call.index
+                        if idx not in tool_calls_data:
+                            tool_calls_data[idx] = {
+                                "id": tool_call.id or "",
+                                "name": "",
+                                "arguments": ""
+                            }
+                            if tool_call.id:
+                                yield {
+                                    "type": "tool_call_start",
+                                    "tool_call_id": tool_call.id,
+                                    "tool_name": ""
+                                }
+                        
+                        if tool_call.function:
+                            if tool_call.function.name:
+                                tool_calls_data[idx]["name"] = tool_call.function.name
+                                yield {
+                                    "type": "tool_call_start",
+                                    "tool_call_id": tool_calls_data[idx]["id"],
+                                    "tool_name": tool_call.function.name
+                                }
+                            if tool_call.function.arguments:
+                                tool_calls_data[idx]["arguments"] += tool_call.function.arguments
+                                yield {
+                                    "type": "tool_call_args",
+                                    "tool_call_id": tool_calls_data[idx]["id"],
+                                    "arguments": tool_call.function.arguments
+                                }
         
-        logger.info(f"[LLM_STREAM] 流式响应完成")
-        logger.info(f"[LLM_STREAM]   - 总chunk数: {chunk_count}")
-        logger.info(f"[LLM_STREAM]   - 内容长度: {content_length}")
-        logger.info(f"[LLM_STREAM]   - 思考内容长度: {thinking_length}")
-        logger.info("-" * 80)
+        final_tool_calls = []
+        for idx in sorted(tool_calls_data.keys()):
+            tc = tool_calls_data[idx]
+            if tc["name"]:
+                final_tool_calls.append({
+                    "id": tc["id"],
+                    "type": "function",
+                    "function": {
+                        "name": tc["name"],
+                        "arguments": tc["arguments"]
+                    }
+                })
+        
+        if thinking_started and thinking_start_time:
+            thinking_duration_value = round(time.time() - thinking_start_time, 1)
+            logger.info(f"思考结束 | 用时: {thinking_duration_value}s")
+            yield {"type": "thinking_end", "duration": thinking_duration_value}
+        
+        logger.info(f"完成 | chunks={chunk_count} | content={content_length} | thinking={thinking_length} | thinking_duration={thinking_duration_value} | tool_calls={len(final_tool_calls)}")
+        
+        if full_thinking:
+            logger.info(f"思考内容:\n{full_thinking}")
+        if full_content:
+            logger.info(f"正式内容:\n{full_content}")
+        if final_tool_calls:
+            for tc in final_tool_calls:
+                logger.info(f"工具调用: {tc['function']['name']} | 参数: {tc['function']['arguments']}")
+        
+        yield {"type": "done", "tool_calls": final_tool_calls}

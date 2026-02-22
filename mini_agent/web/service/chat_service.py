@@ -115,14 +115,11 @@ async def chat_stream_generator(
 ) -> AsyncGenerator[str, None]:
     """生成聊天流式响应."""
     start_time = time.time()
-    sid = session_id[-5:] if session_id else "-----"
+    sid = session_id[-5:] if session_id else "new"
     
     message_content = parsed_content if parsed_content else request.message
     
-    logger.info(f"[{sid}] 开始流式响应生成")
-    logger.info(f"[{sid}] session_id: {session_id} | message_id: {message_id}")
-    logger.info(f"[{sid}] message: {message_content[:50]}{'...' if len(message_content) > 50 else ''} | enable_deep_think: {request.enable_deep_think}")
-    logger.info(f"[{sid}] 请求日志已记录")
+    logger.info(f"[{sid}] 开始流式响应 | message: {message_content[:50]}{'...' if len(message_content) > 50 else ''} | deep_think: {request.enable_deep_think}")
     
     session = db.get_session(session_id)
     
@@ -168,7 +165,6 @@ async def chat_stream_generator(
         if http_request and hasattr(http_request, 'is_disconnected'):
             while not cancel_event.is_set():
                 if await http_request.is_disconnected():
-                    logger.info(f"[{sid}] 检测到客户端断开连接")
                     cancel_event.set()
                     break
                 await asyncio.sleep(0.5)
@@ -179,7 +175,6 @@ async def chat_stream_generator(
     
     try:
         start_event = {'type': 'start', 'session_id': session_id, 'message_id': message_id, 'title': session.title}
-        logger.info(f"[{sid}] 发送事件: start | 标题: {session.title}")
         yield f"data: {json.dumps(start_event, ensure_ascii=False)}\n\n"
         
         event_count = 0
@@ -188,9 +183,6 @@ async def chat_stream_generator(
         async for event in agent.run_stream(message_content, enable_deep_think=request.enable_deep_think):
             event_count += 1
             event_type = event.get("type", "unknown")
-            event_time = time.time() - step_start_time
-            
-            step_start_time = time.time()
             
             if event_type == "thinking_start":
                 thinking_started = True
@@ -201,9 +193,9 @@ async def chat_stream_generator(
                 yield f"data: {json.dumps({'type': 'thinking', 'content': content}, ensure_ascii=False)}\n\n"
             elif event_type == "thinking_end":
                 thinking_duration = event.get("duration")
-                if thinking_duration:
-                    thinking_duration_value = thinking_duration
-                    logger.info(f"[{sid}] 思考完成 | 耗时: {thinking_duration}s")
+                thinking_duration_value = thinking_duration
+                if thinking_duration is not None:
+                    yield f"data: {json.dumps({'type': 'thinking_end', 'duration': thinking_duration}, ensure_ascii=False)}\n\n"
             elif event_type == "assistant_start":
                 assistant_started = True
                 yield f"data: {json.dumps({'type': 'assistant_start', 'content': ''}, ensure_ascii=False)}\n\n"
@@ -219,8 +211,6 @@ async def chat_stream_generator(
                 tool_call_id = event.get("tool_call_id", "")
                 tool_calls_count += 1
                 tool_call_start_times[tool_call_id] = time.time()
-                logger.info(f"[{sid}] 工具调用: tool_name={tool_name} | tool_call_id={tool_call_id}")
-                logger.info(f"[{sid}] 工具参数: {json.dumps(arguments, ensure_ascii=False)[:200]}")
                 
                 db_start = time.time()
                 db.add_tool_call_record(
@@ -232,7 +222,6 @@ async def chat_stream_generator(
                     result=None,
                     success=True
                 )
-                logger.info(f"[{sid}] 保存工具调用记录到数据库 | 耗时: {time.time() - db_start:.2f}s")
                 
                 content_blocks.append({
                     "type": "tool_call",
@@ -250,9 +239,6 @@ async def chat_stream_generator(
                 tool_call_id = event.get("tool_call_id", "")
                 tool_duration = event.get("duration")
                 
-                logger.info(f"[{sid}] 工具结果: tool_name={tool_name} | success={success} | duration={tool_duration}s")
-                logger.info(f"[{sid}] 工具结果内容: {str(result)[:100]}{'...' if len(str(result)) > 100 else ''}")
-                
                 if tool_call_id:
                     db_start = time.time()
                     db.update_tool_call_result(
@@ -262,7 +248,6 @@ async def chat_stream_generator(
                         result=result,
                         success=success
                     )
-                    logger.info(f"[{sid}] 更新工具调用结果到数据库 | 耗时: {time.time() - db_start:.2f}s")
                 
                 content_blocks.append({
                     "type": "tool_result",
@@ -278,21 +263,17 @@ async def chat_stream_generator(
             elif event_type == "done":
                 add_content_block()
                 event_thinking = event.get("thinking", None)
+                event_thinking_duration = event.get("thinking_duration")
                 if event_thinking:
                     thinking_content = event_thinking
+                if event_thinking_duration:
+                    thinking_duration_value = event_thinking_duration
                 
                 steps = event.get("steps", 1)
                 tool_calls = event.get("tool_calls", 0)
                 
                 if thinking_duration_value is None and thinking_start_time and thinking_content:
                     thinking_duration_value = round(time.time() - thinking_start_time, 1)
-                
-                logger.info(f"[{sid}] 思考完成 | 长度: {len(thinking_content) if thinking_content else 0} | 用时: {thinking_duration_value}s")
-                if thinking_content:
-                    logger.info(f"[{sid}] 思考内容全文:\n{thinking_content}")
-                logger.info(f"[{sid}] 正式内容完成 | 长度: {len(full_response)}")
-                logger.info(f"[{sid}] 正式响应全文:\n{full_response}")
-                logger.info(f"[{sid}] 响应完成: steps={steps} | tool_calls={tool_calls}")
                 
                 if thinking_content:
                     thinking_block = {
@@ -314,9 +295,7 @@ async def chat_stream_generator(
                     "blocks": content_blocks
                 }
                 
-                db_start = time.time()
                 db.add_message(session_id, assistant_message)
-                logger.info(f"[{sid}] 保存助手消息到数据库 | blocks_count={len(content_blocks)} | 耗时: {time.time() - db_start:.2f}s")
                 
                 done_event = {
                     'type': 'done', 
@@ -328,7 +307,6 @@ async def chat_stream_generator(
                     'thinking': thinking_content,
                     'thinking_duration': thinking_duration_value
                 }
-                logger.info(f"[{sid}] 发送事件: done")
                 yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
             elif event_type == "error":
                 error_msg = event.get("content", "")
@@ -344,7 +322,7 @@ async def chat_stream_generator(
                 pass
         
         total_time = time.time() - start_time
-        logger.info(f"[{sid}] 流式响应完成: 总事件数={event_count} | 总内容长度={len(full_response)} | 工具调用次数={tool_calls_count} | 总耗时: {total_time:.2f}s")
+        logger.info(f"[{sid}] 完成 | events={event_count} | content={len(full_response)} | tools={tool_calls_count} | 耗时: {total_time:.2f}s")
                     
     except Exception as e:
         cancel_event.set()
@@ -377,11 +355,9 @@ async def chat_non_stream(
     
     session_id = request.session_id
     message_id = request.message_id or str(uuid.uuid4())
-    sid = session_id[-5:] if session_id else "-----"
+    sid = session_id[-5:] if session_id else "new"
     
-    logger.info(f"[{sid}] 收到聊天请求(非流式)")
-    logger.info(f"[{sid}] session_id: {session_id} | message_id: {message_id}")
-    logger.info(f"[{sid}] message: {request.message[:50]}{'...' if len(request.message) > 50 else ''} | enable_deep_think: {request.enable_deep_think}")
+    logger.info(f"[{sid}] 非流式请求 | message: {request.message[:50]}{'...' if len(request.message) > 50 else ''}")
     
     if session_id is None:
         session_id = str(uuid.uuid4())
@@ -394,7 +370,6 @@ async def chat_non_stream(
             updated_at=now,
         )
         db.create_session(session_data)
-        logger.info(f"[{sid}] 新建会话 | 标题: {session_data.title}")
     else:
         session = db.get_session(session_id)
         if session and len(session.messages) == 0:
@@ -402,7 +377,6 @@ async def chat_non_stream(
             session.title = new_title
             session.updated_at = datetime.now().isoformat()
             db.update_session(session)
-            logger.info(f"[{sid}] 更新会话标题 | 新标题: {new_title}")
     
     user_message = {
         "role": "user",
@@ -422,7 +396,6 @@ async def chat_non_stream(
     )
     
     tool_list = list(agent.tools.values())
-    logger.info(f"[{sid}] 请求日志已记录")
     
     full_response = ""
     thinking_content = None
@@ -435,7 +408,7 @@ async def chat_non_stream(
             else:
                 full_response += chunk
     except Exception as e:
-        logger.error(f"[{sid}] 非流式响应异常: {str(e)}")
+        logger.error(f"[{sid}] 异常: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
     
     assistant_message = {
@@ -446,7 +419,7 @@ async def chat_non_stream(
     }
     db.add_message(session_id, assistant_message)
     
-    logger.info(f"[{sid}] 非流式响应完成: content_length={len(full_response)}")
+    logger.info(f"[{sid}] 完成 | content={len(full_response)}")
     
     return ChatResponse(
         session_id=session_id,

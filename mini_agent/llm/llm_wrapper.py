@@ -134,7 +134,7 @@ class LLMClient:
         messages: list[Message],
         tools: list[Any] | None = None,
         enable_deep_think: bool = False,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Stream generate response from LLM.
 
         Args:
@@ -143,7 +143,7 @@ class LLMClient:
             enable_deep_think: Whether to enable deep thinking mode
 
         Yields:
-            Text chunks as they are generated
+            Dict with type and content
         """
         async for chunk in self._client.stream_generate(messages, tools, enable_deep_think):
             yield chunk

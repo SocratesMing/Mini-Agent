@@ -62,7 +62,7 @@ class LLMClientBase(ABC):
         messages: list[Message],
         tools: list[Any] | None = None,
         enable_deep_think: bool = False,
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """Stream generate response from LLM.
 
         Args:
@@ -71,7 +71,12 @@ class LLMClientBase(ABC):
             enable_deep_think: Whether to enable deep thinking mode
 
         Yields:
-            Text chunks as they are generated
+            Dict with type and content:
+            - {"type": "content", "content": str}
+            - {"type": "thinking", "content": str}
+            - {"type": "tool_call_start", "tool_name": str, "tool_call_id": str}
+            - {"type": "tool_call_args", "arguments": str, "tool_call_id": str}
+            - {"type": "done", "tool_calls": list}
         """
         pass
 

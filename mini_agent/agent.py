@@ -427,8 +427,7 @@ Requirements:
         start_time = time.time()
         sid = self.session_id[-5:] if self.session_id else "-----"
         
-        logger.info(f"[{sid}] 开始Agent执行")
-        logger.info(f"[{sid}] user_message: {user_message[:100]}{'...' if len(user_message) > 100 else ''} | enable_deep_think: {enable_deep_think} | max_steps: {self.max_steps}")
+        logger.info(f"[{sid}] 开始 | message: {user_message[:50]}{'...' if len(user_message) > 50 else ''} | deep_think: {enable_deep_think}")
         
         if cancel_event is not None:
             self.cancel_event = cancel_event
@@ -438,19 +437,15 @@ Requirements:
         if enable_deep_think:
             print(f"{Colors.BRIGHT_MAGENTA}🔮 Deep Think Mode Enabled{Colors.RESET}")
             print(f"{Colors.DIM}📝 Log file: {self.logger.get_log_file_path()}{Colors.RESET}")
-            logger.info(f"[{sid}] 深度思考模式已启用")
         else:
             print(f"{Colors.DIM}📝 Log file: {self.logger.get_log_file_path()}{Colors.RESET}")
 
         self.add_user_message(user_message)
-        logger.info(f"[{sid}] 用户消息已添加到上下文")
 
         step = 0
         run_start_time = perf_counter()
 
         while step < self.max_steps:
-            logger.info(f"[{sid}] 开始执行步骤 {step + 1}/{self.max_steps}")
-            
             if self._check_cancelled():
                 self._cleanup_incomplete_messages()
                 logger.error(f"[{sid}] 任务被用户取消")
@@ -470,8 +465,6 @@ Requirements:
             print(f"{Colors.DIM}╰{'─' * BOX_WIDTH}╯{Colors.RESET}")
 
             tool_list = list(self.tools.values())
-
-            logger.info(f"[{sid}] 可用工具: {[t.name for t in tool_list]}")
             
             self.logger.log_request(messages=self.messages, tools=tool_list)
 
@@ -481,9 +474,9 @@ Requirements:
             assistant_started = False
             full_response = ""
             thinking_content = ""
+            thinking_duration_value = None
 
             llm_start_time = time.time()
-            logger.info(f"[{sid}] 开始LLM流式生成...")
             thinking_start_time = None
             
             try:
@@ -494,55 +487,83 @@ Requirements:
                     chunk_count += 1
                     chunk_type = chunk.get("type", "")
                     
-                    if chunk_type == "thinking":
-                        if not thinking_started:
-                            thinking_started = True
-                            thinking_start_time = time.time()
-                            yield {"type": "thinking_start", "content": ""}
+                    if chunk_type == "thinking_start":
+                        thinking_started = True
+                        thinking_start_time = time.time()
+                        yield {"type": "thinking_start", "content": ""}
+                    
+                    elif chunk_type == "thinking":
                         thinking_content = (thinking_content or "") + chunk.get("content", "")
                         yield {"type": "thinking", "content": chunk.get("content", "")}
+                    
+                    elif chunk_type == "thinking_end":
+                        thinking_duration_value = chunk.get("duration")
+                        if thinking_duration_value is not None:
+                            yield {"type": "thinking_end", "duration": thinking_duration_value}
                     
                     elif chunk_type == "content":
                         content = chunk.get("content", "")
                         if content and not assistant_started:
                             assistant_started = True
-                            if thinking_start_time:
-                                thinking_duration = round(time.time() - thinking_start_time, 1)
-                                yield {"type": "thinking_end", "duration": thinking_duration}
+                            if thinking_start_time and not thinking_duration_value:
+                                thinking_duration_value = round(time.time() - thinking_start_time, 1)
+                                yield {"type": "thinking_end", "duration": thinking_duration_value}
                             yield {"type": "assistant_start", "content": ""}
                         if content:
                             full_response += content
                             yield {"type": "content", "content": content}
                     
-                    elif chunk_type == "tool_call_start":
-                        tool_name = chunk.get("tool_name", "")
-                        tool_call_id = chunk.get("tool_call_id", "")
-                        logger.info(f"[{sid}] 工具调用开始: tool_name={tool_name} | tool_call_id={tool_call_id}")
-                    
                     elif chunk_type == "done":
                         collected_tool_calls = chunk.get("tool_calls", [])
 
+                if thinking_content and thinking_duration_value is None and thinking_start_time:
+                    thinking_duration_value = round(time.time() - thinking_start_time, 1)
+                    yield {"type": "thinking_end", "duration": thinking_duration_value}
+
                 llm_elapsed = time.time() - llm_start_time
-                logger.info(f"[{sid}] LLM流式生成完成，共 {chunk_count} 个片段 | 耗时: {llm_elapsed:.2f}s")
-                logger.info(f"[{sid}]   - 内容长度: {len(full_response)}")
-                if thinking_content:
-                    logger.info(f"[{sid}]   - 思考内容长度: {len(thinking_content)}")
+                logger.info(f"[{sid}] LLM完成 | chunks={chunk_count} | content={len(full_response)} | thinking={len(thinking_content) if thinking_content else 0} | thinking_duration={thinking_duration_value} | tools={len(collected_tool_calls)} | 耗时: {llm_elapsed:.2f}s")
+                
                 if collected_tool_calls:
-                    logger.info(f"[{sid}]   - 工具调用数: {len(collected_tool_calls)}")
+                    for tc in collected_tool_calls:
+                        if tc.get("type") == "function" and "function" in tc:
+                            logger.info(f"[{sid}] 工具调用: {tc['function']['name']} | 参数: {tc['function']['arguments']}")
+                        elif "name" in tc:
+                            logger.info(f"[{sid}] 工具调用: {tc['name']} | 参数: {tc['arguments']}")
 
                 tool_calls_for_msg = None
                 if collected_tool_calls:
-                    tool_calls_for_msg = [
-                        ToolCall(
-                            id=tc["id"],
-                            type="function",
-                            function=FunctionCall(
-                                name=tc["name"],
-                                arguments=tc["arguments"],
-                            ),
-                        )
-                        for tc in collected_tool_calls
-                    ]
+                    tool_calls_for_msg = []
+                    for tc in collected_tool_calls:
+                        if tc.get("type") == "function" and "function" in tc:
+                            args = tc["function"]["arguments"]
+                            if isinstance(args, str):
+                                try:
+                                    args = json.loads(args)
+                                except:
+                                    args = {}
+                            tool_calls_for_msg.append(ToolCall(
+                                id=tc["id"],
+                                type="function",
+                                function=FunctionCall(
+                                    name=tc["function"]["name"],
+                                    arguments=args,
+                                ),
+                            ))
+                        elif "name" in tc:
+                            args = tc["arguments"]
+                            if isinstance(args, str):
+                                try:
+                                    args = json.loads(args)
+                                except:
+                                    args = {}
+                            tool_calls_for_msg.append(ToolCall(
+                                id=tc["id"],
+                                type="function",
+                                function=FunctionCall(
+                                    name=tc["name"],
+                                    arguments=args,
+                                ),
+                            ))
 
                 self.logger.log_response(
                     content=full_response,
@@ -558,23 +579,20 @@ Requirements:
                     tool_calls=tool_calls_for_msg,
                 )
                 self.messages.append(assistant_msg)
-                logger.info(f"[{sid}] 助手消息已添加到上下文")
 
                 if not collected_tool_calls:
                     step_elapsed = perf_counter() - step_start_time
                     total_elapsed = perf_counter() - run_start_time
                     print(f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}")
-                    logger.info(f"[{sid}] 步骤 {step + 1} 完成，无工具调用 | 耗时: {step_elapsed:.2f}s | 总耗时: {total_elapsed:.2f}s")
-                    if thinking_content:
-                        logger.info(f"[{sid}] 最终思考内容长度: {len(thinking_content)}")
                     yield {
                         "type": "done",
                         "content": full_response,
                         "thinking": thinking_content,
+                        "thinking_duration": thinking_duration_value,
                         "steps": step + 1,
                         "tool_calls": 0,
                     }
-                    logger.info(f"[{sid}] Agent执行完成 | 总耗时: {time.time() - start_time:.2f}s")
+                    logger.info(f"[{sid}] 完成 | steps={step + 1} | 耗时: {time.time() - start_time:.2f}s")
                     return
 
                 if self._check_cancelled():
@@ -582,16 +600,20 @@ Requirements:
                     logger.error(f"[{sid}] 任务被用户取消")
                     yield {"type": "error", "content": "Task cancelled by user."}
                     return
-
-                logger.info(f"[{sid}] 检测到 {len(collected_tool_calls)} 个工具调用")
                 
                 for tool_call in collected_tool_calls:
                     tool_call_id = tool_call["id"]
-                    function_name = tool_call["name"]
-                    arguments = tool_call["arguments"]
-
-                    logger.info(f"[{sid}] 执行工具调用: tool_name={function_name} | tool_call_id={tool_call_id}")
-                    logger.info(f"[{sid}] 工具参数: {json.dumps(arguments, ensure_ascii=False)}")
+                    if tool_call.get("type") == "function" and "function" in tool_call:
+                        function_name = tool_call["function"]["name"]
+                        arguments = tool_call["function"]["arguments"]
+                    else:
+                        function_name = tool_call["name"]
+                        arguments = tool_call["arguments"]
+                    if isinstance(arguments, str):
+                        try:
+                            arguments = json.loads(arguments)
+                        except:
+                            arguments = {}
 
                     print(f"\n{Colors.BRIGHT_YELLOW}🔧 Tool Call:{Colors.RESET} {Colors.BOLD}{Colors.CYAN}{function_name}{Colors.RESET}")
 
@@ -625,9 +647,8 @@ Requirements:
                         try:
                             tool = self.tools[function_name]
                             tool_start_time = time.time()
-                            logger.info(f"[{sid}] 开始执行工具: {function_name}")
                             result = await tool.execute(**arguments)
-                            logger.info(f"[{sid}] 工具执行完成: {function_name} | success={result.success} | 耗时: {time.time() - tool_start_time:.2f}s")
+                            logger.info(f"[{sid}] 工具 {function_name} | success={result.success} | 耗时: {time.time() - tool_start_time:.2f}s")
                         except Exception as e:
                             import traceback
                             logger.error(f"[{sid}] 工具执行异常: {function_name} | error={str(e)}")
@@ -646,11 +667,6 @@ Requirements:
                         result_content=result.content if result.success else None,
                         result_error=result.error if not result.success else None,
                     )
-
-                    if result.success:
-                        logger.info(f"[{sid}] 工具结果: success=True | content_length={len(result.content) if result.content else 0}")
-                    else:
-                        logger.info(f"[{sid}] 工具结果: success=False | error={result.error[:200] if result.error else 'None'}")
 
                     yield {
                         "type": "tool_result",
@@ -676,7 +692,6 @@ Requirements:
                         name=function_name,
                     )
                     self.messages.append(tool_msg)
-                    logger.info(f"[{sid}] 工具消息已添加到上下文")
 
                     if self._check_cancelled():
                         self._cleanup_incomplete_messages()
@@ -687,7 +702,6 @@ Requirements:
                 step_elapsed = perf_counter() - step_start_time
                 total_elapsed = perf_counter() - run_start_time
                 print(f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}")
-                logger.info(f"[{sid}] 步骤 {step + 1} 完成，有工具调用 | 耗时: {step_elapsed:.2f}s | 总耗时: {total_elapsed:.2f}s")
 
                 step += 1
 
@@ -700,9 +714,9 @@ Requirements:
                 else:
                     error_msg = f"LLM call failed: {str(e)}"
                     print(f"\n{Colors.BRIGHT_RED}❌ Error:{Colors.RESET} {error_msg}")
-                logger.error(f"[{sid}] 执行异常: {error_msg}")
+                logger.error(f"[{sid}] 异常: {error_msg}")
                 import traceback
-                logger.error(f"[{sid}] 异常堆栈:\n{traceback.format_exc()}")
+                logger.error(f"[{sid}] 堆栈:\n{traceback.format_exc()}")
                 yield {"type": "error", "content": error_msg}
                 return
 

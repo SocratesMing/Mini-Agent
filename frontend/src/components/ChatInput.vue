@@ -556,10 +556,6 @@ onUnmounted(() => {
   color: #64748b;
 }
 
-.deep-think-btn:hover:not(.disabled) svg {
-  color: #0ea5e9;
-}
-
 .deep-think-btn.active svg {
   color: white;
 }
@@ -569,19 +565,9 @@ onUnmounted(() => {
   color: #64748b;
 }
 
-.deep-think-btn:hover:not(.disabled) {
-  background: rgba(14, 165, 233, 0.1);
-  border-color: transparent;
-}
-
-.deep-think-btn:hover:not(.disabled) svg,
-.deep-think-btn:hover:not(.disabled) .deep-think-label {
-  color: #0ea5e9;
-}
-
 .deep-think-btn.active {
-  background: #0ea5e9;
-  border-color: #0ea5e9;
+  background: #7dd3fc;
+  border-color: #7dd3fc;
   border-radius: 6px;
 }
 

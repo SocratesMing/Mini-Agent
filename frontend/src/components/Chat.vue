@@ -73,6 +73,10 @@ const props = defineProps({
   isStreaming: {
     type: Boolean,
     default: false
+  },
+  scrollTrigger: {
+    type: Number,
+    default: 0
   }
 })
 
@@ -93,10 +97,10 @@ function updateUserMessageIndices() {
     .map((msg, index) => msg.role === 'user' ? index : -1)
     .filter(index => index !== -1)
     .reverse()
+  currentUserMessageIndex.value = -1
 }
 
 const canGoToPrevUserMessage = computed(() => {
-  updateUserMessageIndices()
   return userMessageIndices.value.length > 0 && currentUserMessageIndex.value < userMessageIndices.value.length - 1
 })
 
@@ -104,9 +108,11 @@ const canGoToNextUserMessage = computed(() => {
   return currentUserMessageIndex.value > 0
 })
 
-function goToPrevUserMessage() {
+onMounted(() => {
   updateUserMessageIndices()
-  
+})
+
+function goToPrevUserMessage() {
   if (userMessageIndices.value.length === 0) return
   
   if (currentUserMessageIndex.value === -1) {
@@ -158,13 +164,18 @@ function scrollToBottom() {
   })
 }
 
-watch(() => props.messages.length, scrollToBottom)
-
-watch(() => props.messages, () => {
+watch(() => props.messages, (newMessages, oldMessages) => {
   if (props.isStreaming) {
     scrollToBottom()
   }
+  nextTick(() => {
+    updateUserMessageIndices()
+  })
 }, { deep: true })
+
+watch(() => props.scrollTrigger, () => {
+  scrollToBottom()
+})
 </script>
 
 <style scoped>

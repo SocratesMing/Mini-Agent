@@ -58,7 +58,7 @@
               </svg>
             </div>
             <div v-if="isExpandedThinking(index)" class="thinking-content">
-              <div class="thinking-quote" v-html="renderMarkdown('> ' + block.content.replace(/\n/g, '\n> '))"></div>
+              <div class="thinking-text" v-html="renderMarkdown(block.content)"></div>
             </div>
           </div>
 
@@ -125,7 +125,7 @@
             </svg>
           </div>
           <div v-if="showThinking" class="thinking-content">
-            <div class="thinking-quote" v-html="renderMarkdown('> ' + message.thinking.replace(/\n/g, '\n> '))"></div>
+            <div class="thinking-text" v-html="renderMarkdown(message.thinking)"></div>
           </div>
         </div>
 
@@ -606,36 +606,94 @@ onMounted(() => {
   box-sizing: border-box;
 }
 
+.thinking-text {
+  color: #64748b;
+}
+
+.thinking-text :deep(p) {
+  margin: 0 0 12px 0;
+}
+
+.thinking-text :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.thinking-text :deep(ol),
+.thinking-text :deep(ul) {
+  margin: 12px 0;
+  padding-left: 24px;
+}
+
+.thinking-text :deep(li) {
+  margin: 6px 0;
+}
+
+.thinking-text :deep(code) {
+  background: #e2e8f0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #475569;
+  font-family: 'Fira Code', 'Consolas', monospace;
+}
+
+.thinking-text :deep(pre) {
+  background: #f6f8fa;
+  color: #24292e;
+  padding: 14px;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 16px 0;
+  border: 1px solid #e1e4e8;
+}
+
+.thinking-text :deep(pre code) {
+  background: transparent;
+  padding: 0;
+  font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+}
+
+.thinking-text :deep(.code-block-wrapper) {
+  background: #f6f8fa;
+  border: 1px solid #e1e4e8;
+  border-radius: 8px;
+  margin: 16px 0;
+  overflow: hidden;
+}
+
+.thinking-text :deep(.code-block-wrapper pre) {
+  margin: 0;
+  border: none;
+  padding: 14px;
+}
+
+.thinking-text :deep(.code-block-wrapper pre code) {
+  font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+}
+
+.thinking-text :deep(.code-block-wrapper .shiki) {
+  background: transparent !important;
+  margin: 0;
+}
+
+.thinking-text :deep(.code-block-wrapper .shiki code) {
+  font-family: 'Fira Code', 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+}
+
+.thinking-text :deep(blockquote) {
+  border-left: 3px solid #cbd5e1;
+  padding-left: 16px;
+  margin: 12px 0;
+  color: #64748b;
+}
+
 .thinking-quote {
   border-left: 3px solid #cbd5e1;
   padding-left: 16px;
   color: #64748b;
-}
-
-.thinking-quote :deep(p) {
-  margin: 0 0 8px 0;
-}
-
-.thinking-quote :deep(p:last-child) {
-  margin-bottom: 0;
-}
-
-.thinking-quote :deep(ol),
-.thinking-quote :deep(ul) {
-  margin: 8px 0;
-  padding-left: 20px;
-}
-
-.thinking-quote :deep(li) {
-  margin: 4px 0;
-}
-
-.thinking-quote :deep(code) {
-  background: #e2e8f0;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-size: 12px;
-  color: #475569;
 }
 
 .tool-call-block {

@@ -45,6 +45,7 @@
         :messages="messages"
         :currentSessionId="currentSessionId"
         :isStreaming="isStreaming"
+        :scrollTrigger="scrollTrigger"
         @sendMessage="handleSendMessage"
         @createSession="ensureCurrentSession"
         @removeFile="handleRemoveFile"
@@ -89,6 +90,7 @@ const isSidebarCollapsed = ref(false)
 const showAssets = ref(false)
 const showUserProfile = ref(false)
 const showWelcome = ref(false)
+const scrollTrigger = ref(0)
 const userProfile = ref({
   username: '',
   organization_id: '',
@@ -178,16 +180,14 @@ async function handleCreateSession() {
 async function handleSelectSession(sessionId) {
   showAssets.value = false
   currentSessionId.value = sessionId
-  isStreaming.value = true
   
   try {
     const history = await getChatHistory(sessionId)
     messages.value = history.messages || []
+    scrollTrigger.value++
   } catch (e) {
     console.error('加载聊天历史失败:', e)
     error.value = '加载聊天历史失败'
-  } finally {
-    isStreaming.value = false
   }
 }
 
@@ -219,7 +219,7 @@ async function handleRenameSession(sessionId, newTitle) {
   }
 }
 
-async function handleSendMessage(message, files = [], signal, enableDeepThink = false) {
+async function handleSendMessage(message, files = [], signal, enableDeepThink = true) {
   const userMsgId = `user-${Date.now()}`
 
   let contentWithFiles = message.trim().replace(/\s+/g, ' ')
@@ -290,11 +290,19 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
   function updateThinkingDuration(duration) {
     const idx = messages.value.findIndex(m => m.id === assistantMsgId)
     if (idx !== -1) {
-      const thinkingBlock = messages.value[idx].blocks.find(b => b.type === 'thinking')
-      if (thinkingBlock) {
-        thinkingBlock.duration = duration
+      const blockIdx = messages.value[idx].blocks.findIndex(b => b.type === 'thinking')
+      if (blockIdx !== -1) {
+        messages.value[idx].blocks[blockIdx] = {
+          ...messages.value[idx].blocks[blockIdx],
+          duration: duration
+        }
       }
-      messages.value[idx] = { ...messages.value[idx], thinking_duration: duration }
+      messages.value[idx] = { 
+        ...messages.value[idx], 
+        thinking_duration: duration,
+        blocks: [...messages.value[idx].blocks]
+      }
+      console.log('Updated thinking duration:', duration)
     }
   }
 
@@ -333,8 +341,11 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
           messages.value[idx] = { ...messages.value[idx], thinking: currentThinking }
         }
       } else if (eventType === 'thinking_end') {
-        if (data.duration) {
+        console.log('Received thinking_end event:', JSON.stringify(data))
+        if (data.duration !== undefined) {
           updateThinkingDuration(data.duration)
+        } else {
+          console.warn('thinking_end event has no duration:', data)
         }
       } else if (eventType === 'content') {
         currentContent += data.content || ''

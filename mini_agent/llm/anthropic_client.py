@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 from typing import Any, AsyncGenerator
 
 import anthropic
@@ -328,19 +329,36 @@ class AnthropicClient(LLMClientBase):
         thinking_length = 0
         tool_calls_data = {}
         event_count = 0
+        thinking_started = False
+        thinking_start_time = None
+        thinking_duration_value = None
+        full_thinking = ""
+        full_content = ""
         
         async for event in stream_iterator:
             event_count += 1
             
             if event_count <= 10:
-                logger.debug(f"[LLM_STREAM] event {event_count}: type={event.type}")
+                logger.debug(f"event {event_count}: type={event.type}")
             
             if event.type == "content_block_delta":
                 if event.delta.type == "text_delta":
+                    if thinking_started and thinking_start_time:
+                        thinking_duration_value = round(time.time() - thinking_start_time, 1)
+                        logger.info(f"思考结束 | 用时: {thinking_duration_value}s")
+                        yield {"type": "thinking_end", "duration": thinking_duration_value}
+                        thinking_started = False
                     content_length += len(event.delta.text)
+                    full_content += event.delta.text
                     yield {"type": "content", "content": event.delta.text}
                 elif event.delta.type == "thinking_delta":
+                    if not thinking_started:
+                        thinking_started = True
+                        thinking_start_time = time.time()
+                        logger.info(f"思考开始")
+                        yield {"type": "thinking_start", "content": ""}
                     thinking_length += len(event.delta.thinking)
+                    full_thinking += event.delta.thinking
                     yield {"type": "thinking", "content": event.delta.thinking}
                 elif event.delta.type == "input_json_delta":
                     if hasattr(event, 'index'):
@@ -354,12 +372,24 @@ class AnthropicClient(LLMClientBase):
             elif event.type == "content_block_start":
                 if hasattr(event, "content_block") and event.content_block:
                     if event.content_block.type == "thinking":
+                        if not thinking_started:
+                            thinking_started = True
+                            thinking_start_time = time.time()
+                            logger.info(f"思考开始")
+                            yield {"type": "thinking_start", "content": ""}
                         if hasattr(event.content_block, "thinking"):
                             thinking_length += len(event.content_block.thinking)
+                            full_thinking += event.content_block.thinking
                             yield {"type": "thinking", "content": event.content_block.thinking}
                     elif event.content_block.type == "text":
+                        if thinking_started and thinking_start_time:
+                            thinking_duration_value = round(time.time() - thinking_start_time, 1)
+                            logger.info(f"思考结束 | 用时: {thinking_duration_value}s")
+                            yield {"type": "thinking_end", "duration": thinking_duration_value}
+                            thinking_started = False
                         if hasattr(event.content_block, "text"):
                             content_length += len(event.content_block.text)
+                            full_content += event.content_block.text
                             yield {"type": "content", "content": event.content_block.text}
                     elif event.content_block.type == "tool_use":
                         idx = event.index if hasattr(event, 'index') else len(tool_calls_data)
@@ -386,10 +416,20 @@ class AnthropicClient(LLMClientBase):
                 "arguments": args
             })
         
-        logger.info(f"[LLM_STREAM] 流式响应完成")
-        logger.info(f"[LLM_STREAM]   - 内容长度: {content_length}")
-        logger.info(f"[LLM_STREAM]   - 思考内容长度: {thinking_length}")
-        logger.info(f"[LLM_STREAM]   - 工具调用数: {len(tool_calls)}")
+        if thinking_started and thinking_start_time:
+            thinking_duration_value = round(time.time() - thinking_start_time, 1)
+            logger.info(f"思考结束 | 用时: {thinking_duration_value}s")
+            yield {"type": "thinking_end", "duration": thinking_duration_value}
+        
+        logger.info(f"完成 | content={content_length} | thinking={thinking_length} | thinking_duration={thinking_duration_value} | tool_calls={len(tool_calls)}")
+        
+        if full_thinking:
+            logger.info(f"思考内容:\n{full_thinking}")
+        if full_content:
+            logger.info(f"正式内容:\n{full_content}")
+        if tool_calls:
+            for tc in tool_calls:
+                logger.info(f"工具调用: {tc['name']} | 参数: {json.dumps(tc['arguments'], ensure_ascii=False)}")
         
         yield {"type": "done", "tool_calls": tool_calls}
 

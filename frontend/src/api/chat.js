@@ -47,7 +47,7 @@ export async function getChatHistory(sessionId) {
   return { messages: data.messages || [] }
 }
 
-export async function sendMessage(sessionId, message, onChunk, signal, enableDeepThink = false, files = []) {
+export async function sendMessage(sessionId, message, onChunk, signal, enableDeepThink = true, files = []) {
   const controller = new AbortController()
   const abortSignal = signal || controller.signal
 

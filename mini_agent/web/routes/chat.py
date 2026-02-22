@@ -48,32 +48,17 @@ async def chat_stream(
     session_id = request.session_id
     message_id = request.message_id or str(uuid.uuid4())
     
-    sid = session_id[-5:] if session_id else "-----"
+    sid = session_id[-5:] if session_id else "new"
     
-    logger.info(f"[{sid}] 收到聊天请求")
-    logger.info(f"[{sid}] session_id: {session_id or '新建'} | message_id: {message_id}")
-    logger.info(f"[{sid}] message: {request.message[:100]}{'...' if len(request.message) > 100 else ''} | enable_deep_think: {request.enable_deep_think}")
+    logger.info(f"[{sid}] 聊天请求 | message: {request.message[:50]}{'...' if len(request.message) > 50 else ''} | deep_think: {request.enable_deep_think}")
     
-    # 生成会话标题
     def generate_session_title(message, files):
-        """生成会话标题
-        
-        Args:
-            message: 用户消息内容
-            files: 用户上传的文件列表
-            
-        Returns:
-            会话标题
-        """
-        # 如果用户输入了消息，使用消息的前12个字符
         if message and message.strip():
             title = message.strip()
             return title[:12] + "..." if len(title) > 12 else title
-        # 如果用户只上传了文件而没有输入消息，使用文件名
         elif files and len(files) > 0:
             filename = files[0].get('filename', '文件')
             return filename[:12] + "..." if len(filename) > 12 else filename
-        # 默认标题
         else:
             return "未命名会话"
     
@@ -89,11 +74,9 @@ async def chat_stream(
             updated_at=now,
         )
         db.create_session(session_data)
-        logger.info(f"[{sid}] 新建会话 | 标题: {session_title}")
     else:
         session = db.get_session(session_id)
         if not session:
-            # 如果会话不存在，创建新会话
             session_id = str(uuid.uuid4())
             now = datetime.now().isoformat()
             session_title = generate_session_title(request.message, request.files)
@@ -105,13 +88,11 @@ async def chat_stream(
                 updated_at=now,
             )
             db.create_session(session_data)
-            logger.info(f"[{sid}] 会话不存在，创建新会话 | session_id: {session_id} | 标题: {session_title}")
         elif len(session.messages) == 0:
             session_title = generate_session_title(request.message, request.files)
             session.title = session_title
             session.updated_at = datetime.now().isoformat()
             db.update_session(session)
-            logger.info(f"[{sid}] 更新会话标题: {session_title}")
     
     user_message = {
         "role": "user",
@@ -120,11 +101,9 @@ async def chat_stream(
         "files": request.files or [],
     }
     db.add_message(session_id, user_message)
-    logger.info(f"[{sid}] 保存用户消息到数据库")
     
     parsed_content = request.message
     if request.files and len(request.files) > 0:
-        logger.info(f"[{sid}] 检测到用户上传文件，准备解析...")
         try:
             from mini_agent.tools import DocumentParseTool
             parse_tool = DocumentParseTool()
@@ -133,28 +112,21 @@ async def chat_stream(
             for file_info in request.files:
                 file_path = file_info.get('file_path')
                 if file_path:
-                    logger.info(f"[{sid}] 解析文件: {file_path}")
                     result = parse_tool.run(file_path)
                     if result.get('success'):
                         content = result.get('content', '')
                         filename = file_info.get('filename', 'unknown')
                         file_contents.append(f"【文件: {filename}】\n{content}")
-                        logger.info(f"[{sid}] 文件解析成功: {filename} | 长度: {len(content)} 字符")
                     else:
-                        logger.warning(f"[{sid}] 文件解析失败: {file_path} | 错误: {result.get('content')}")
+                        logger.warning(f"[{sid}] 文件解析失败: {file_path}")
             
             if file_contents:
                 parsed_content = f"{request.message}\n\n--- 文件内容 ---\n\n" + "\n\n---\n\n".join(file_contents)
-                logger.info(f"[{sid}] 文件内容已合并到用户消息 | 总长度: {len(parsed_content)} 字符")
         except Exception as e:
             logger.error(f"[{sid}] 文件解析出错: {str(e)}")
     
-    logger.info(f"[{sid}] 加载应用配置...")
-    
     from mini_agent.web.server import get_app_config
     app_config = get_app_config()
-    
-    logger.info(f"[{sid}] LLM Provider: {app_config.llm.provider} | Model: {app_config.llm.model} | Max Steps: {app_config.agent.max_steps}")
     
     try:
         from mini_agent.llm import LLMClient
@@ -168,7 +140,6 @@ async def chat_stream(
             model=app_config.llm.model,
             retry_config=app_config.llm.retry,
         )
-        logger.info(f"[{sid}] LLM客户端创建成功 | Provider: {provider}")
     except Exception as e:
         logger.error(f"[{sid}] LLM客户端创建失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取LLM客户端失败: {str(e)}")
@@ -195,8 +166,6 @@ async def chat_stream(
         
         if app_config.tools.enable_note:
             tools.append(SessionNoteTool(memory_file=str(project_root / "workspace" / ".agent_memory.json")))
-        
-        logger.info(f"[{sid}] 工具加载完成 | 总数: {len(tools)} | 工具: {[t.name for t in tools]}")
     except Exception as e:
         logger.error(f"[{sid}] 工具加载失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取工具列表失败: {str(e)}")
@@ -209,7 +178,6 @@ async def chat_stream(
             if os.path.exists(prompt_path):
                 with open(prompt_path, 'r', encoding='utf-8') as f:
                     system_prompt = f.read()
-                logger.info(f"[{sid}] 系统提示词加载成功 | 长度: {len(system_prompt)} 字符")
         
         components = {
             "llm_client": llm_client,
@@ -230,9 +198,6 @@ async def chat_stream(
         components["max_steps"],
         components["workspace_dir"],
     )
-    
-    logger.info(f"[{sid}] Agent实例创建/获取成功 | 最大步数: {components['max_steps']}")
-    logger.info(f"[{sid}] 开始流式响应... | 耗时: {time.time() - start_time:.2f}s")
     
     return StreamingResponse(
         chat_stream_generator(
@@ -260,7 +225,7 @@ async def chat_stream(
 )
 async def clear_session_agent(session_id: str):
     """清除会话的Agent缓存."""
-    sid = session_id[-5:] if session_id else "-----"
+    sid = session_id[-5:] if session_id else "new"
     remove_session_agent(session_id)
     logger.info(f"[{sid}] Agent缓存已清除")
     return {
