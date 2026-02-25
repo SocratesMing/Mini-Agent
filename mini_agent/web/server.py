@@ -26,6 +26,11 @@ db_instance = None
 
 def setup_logging():
     """配置日志：同时输出到控制台和文件."""
+    root_logger = logging.getLogger()
+    
+    if root_logger.handlers:
+        return None
+    
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
     
@@ -49,8 +54,15 @@ def setup_logging():
     root_logger.addHandler(console_handler)
     root_logger.addHandler(file_handler)
     
-    logging.getLogger("uvicorn").setLevel(logging.INFO)
-    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+    uvicorn_logger = logging.getLogger("uvicorn")
+    uvicorn_logger.setLevel(logging.INFO)
+    uvicorn_logger.addHandler(console_handler)
+    uvicorn_logger.addHandler(file_handler)
+    
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    uvicorn_access_logger.setLevel(logging.INFO)
+    uvicorn_access_logger.addHandler(console_handler)
+    uvicorn_access_logger.addHandler(file_handler)
     
     return log_file
 
@@ -203,6 +215,8 @@ async def health_check():
 
 
 if __name__ == "__main__":
+    setup_logging()
+    
     print("=" * 50)
     print("  Mini Agent API Server")
     print("=" * 50)

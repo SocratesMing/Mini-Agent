@@ -1,0 +1,248 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "外汇量化策略参数配置Schema",
+  "description": "定义外汇量化回测策略的参数配置结构",
+  "type": "object",
+  "required": ["config", "custParams"],
+  "properties": {
+    "config": {
+      "type": "object",
+      "title": "回测配置",
+      "description": "回测引擎的基础配置",
+      "properties": {
+        "indicator": {
+          "type": "array",
+          "title": "技术指标配置",
+          "description": "需要计算的技术指标列表",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "trade_delay": {
+          "type": "integer",
+          "title": "交易延迟",
+          "description": "下单延迟（毫秒）",
+          "default": 10
+        },
+        "bizType": {
+          "type": "string",
+          "title": "业务类型",
+          "description": "交易品种类型",
+          "enum": ["FX", " futures", "stock"],
+          "default": "FX"
+        },
+        "optimize": {
+          "type": "object",
+          "title": "参数优化配置",
+          "description": "参数优化设置",
+          "properties": {
+            "param": {
+              "type": "array",
+              "title": "优化参数列表",
+              "items": {
+                "type": "object",
+                "required": ["name", "min", "max", "step"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "title": "参数名称",
+                    "description": "需要优化的参数名"
+                  },
+                  "min": {
+                    "type": "number",
+                    "title": "最小值",
+                    "description": "优化范围最小值"
+                  },
+                  "max": {
+                    "type": "number",
+                    "title": "最大值",
+                    "description": "优化范围最大值"
+                  },
+                  "step": {
+                    "type": "number",
+                    "title": "步长",
+                    "description": "优化步长"
+                  },
+                  "type": {
+                    "type": "string",
+                    "title": "参数类型",
+                    "enum": ["discrete", "continuous"],
+                    "default": "discrete"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "init_money": {
+          "type": "number",
+          "title": "初始资金",
+          "description": "回测初始资金",
+          "default": 10000
+        },
+        "startTime": {
+          "type": "string",
+          "title": "回测开始时间",
+          "description": "回测时间范围起始",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$"
+        },
+        "endTime": {
+          "type": "string",
+          "title": "回测结束时间",
+          "description": "回测时间范围结束",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$"
+        },
+        "sample_frequency": {
+          "type": "integer",
+          "title": "采样频率",
+          "description": "数据采样频率（0表示全部）",
+          "default": 0
+        },
+        "check": {
+          "type": "integer",
+          "title": "数据校验开关",
+          "description": "是否进行数据校验",
+          "default": 1
+        },
+        "quickActions": {
+          "type": "integer",
+          "title": "快速下单模式",
+          "description": "快速下单模式设置",
+          "default": 3
+        },
+        "subscribed_data": {
+          "type": "array",
+          "title": "订阅数据列表",
+          "description": "策略需要订阅的市场数据",
+          "items": {
+            "type": "object",
+            "required": ["symbol", "sub_type", "kind", "source", "type"],
+            "properties": {
+              "symbol": {
+                "type": "string",
+                "title": "交易品种",
+                "description": "如 EURUSDSP, GBPUSDSP"
+              },
+              "sub_type": {
+                "type": "string",
+                "title": "订阅子类型",
+                "description": "1=深度行情, 2=K线数据"
+              },
+              "kind": {
+                "type": "string",
+                "title": "数据类型",
+                "enum": ["tick", "bar"]
+              },
+              "source": {
+                "type": "string",
+                "title": "数据源",
+                "description": "如 HDATA_HO"
+              },
+              "type": {
+                "type": "string",
+                "title": "数据类型标识",
+                "description": "如 FXSPOT, 1H_BAR_DEPTH"
+              }
+            }
+          }
+        },
+        "trade_probability": {
+          "type": "integer",
+          "title": "交易概率",
+          "description": "信号执行概率（0-100）",
+          "default": 100,
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "custParams": {
+      "type": "array",
+      "title": "策略自定义参数",
+      "description": "用户在策略方案界面配置的自定义参数",
+      "items": {
+        "type": "object",
+        "required": ["name", "value", "key"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "参数名",
+            "description": "参数变量名"
+          },
+          "value": {
+            "type": ["string", "number", "boolean"],
+            "title": "参数值",
+            "description": "参数值"
+          },
+          "key": {
+            "type": "string",
+            "title": "参数显示名称",
+            "description": "界面上显示的参数名称"
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "config": {
+        "indicator": [],
+        "trade_delay": 10,
+        "bizType": "FX",
+        "optimize": {
+          "param": [
+            {
+              "name": "sl",
+              "min": 50,
+              "max": 200,
+              "step": 10,
+              "type": "discrete"
+            },
+            {
+              "name": "tp",
+              "min": 500,
+              "max": 2000,
+              "step": 100,
+              "type": "discrete"
+            }
+          ]
+        },
+        "init_money": 10000,
+        "startTime": "2016-01-01 00:00:00",
+        "endTime": "2025-07-31 00:00:00",
+        "sample_frequency": 0,
+        "check": 1,
+        "quickActions": 3,
+        "subscribed_data": [
+          {
+            "symbol": "EURUSDSP",
+            "sub_type": "1",
+            "kind": "tick",
+            "source": "HDATA_HO",
+            "type": "FXSPOT"
+          },
+          {
+            "symbol": "EURUSDSP",
+            "sub_type": "2",
+            "kind": "bar",
+            "source": "HDATA_HO",
+            "type": "1H_BAR_DEPTH"
+          }
+        ],
+        "trade_probability": 100
+      },
+      "custParams": [
+        {"name": "symbol", "value": "EURUSDSP", "key": "策略合约"},
+        {"name": "source", "value": "HDATA_HO", "key": "合约渠道"},
+        {"name": "bar_frequency", "value": "1H_BAR_DEPTH", "key": "bar数据频率"},
+        {"name": "lot", "value": 10000, "key": "下单量"},
+        {"name": "tp", "value": 1000, "key": "止盈点数"},
+        {"name": "sl", "value": 100, "key": "止损点数"},
+        {"name": "sp", "value": 50, "key": "价差点数"},
+        {"name": "protect_flag", "value": "关", "key": "推平保护开关"},
+        {"name": "move_flag", "value": "关", "key": "移动止损开关"}
+      ]
+    }
+  ]
+}

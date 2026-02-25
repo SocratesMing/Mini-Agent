@@ -21,16 +21,6 @@
         @removeFile="(file) => handleRemoveFile(file, index)"
       />
     </div>
-      
-      <!-- 加载动画 -->
-      <div v-if="isStreaming && messages.length > 0 && messages[messages.length - 1].role === 'user'" class="loading-container">
-        <div class="loading-animation">
-          <div class="loading-dot"></div>
-          <div class="loading-dot"></div>
-          <div class="loading-dot"></div>
-        </div>
-        <span class="loading-text">AI 正在思考中...</span>
-      </div>
     </div>
     
     <button v-if="canGoToNextUserMessage" @click="goToNextUserMessage" class="scroll-btn next" title="回到下一个用户问题">

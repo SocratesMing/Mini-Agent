@@ -22,6 +22,11 @@ logger = logging.getLogger("mini_agent.chat_service")
 agent_cache: dict[str, Agent] = {}
 agent_cache_lock = None
 
+_cached_tools = None
+_cached_skill_loader = None
+_cached_llm_client = None
+_cached_system_prompt = None
+
 
 def get_agent_cache_lock():
     """获取Agent缓存锁（懒加载）."""
@@ -66,6 +71,122 @@ def remove_session_agent(session_id: str):
             del agent_cache[session_id]
 
 
+def get_llm_client():
+    """获取LLM客户端（带缓存）."""
+    global _cached_llm_client
+    
+    if _cached_llm_client is not None:
+        return _cached_llm_client
+    
+    from mini_agent.llm import LLMClient
+    from mini_agent.schema import LLMProvider
+    from mini_agent.web.server import get_app_config
+    
+    app_config = get_app_config()
+    provider = LLMProvider.ANTHROPIC if app_config.llm.provider == "anthropic" else LLMProvider.OPENAI
+    
+    _cached_llm_client = LLMClient(
+        api_key=app_config.llm.api_key,
+        provider=provider,
+        api_base=app_config.llm.api_base,
+        model=app_config.llm.model,
+        retry_config=app_config.llm.retry,
+    )
+    
+    return _cached_llm_client
+
+
+def get_tools():
+    """获取工具列表，包括基础工具和Skills（带缓存）.
+    
+    复用 cli.py 中的 initialize_base_tools 和 add_workspace_tools 函数.
+    """
+    global _cached_tools, _cached_skill_loader
+    
+    if _cached_tools is not None:
+        return _cached_tools, _cached_skill_loader
+    
+    from pathlib import Path
+    from mini_agent.tools import (
+        BashTool,
+        ReadTool, WriteTool, EditTool,
+        SessionNoteTool, DocumentParseTool, DocumentInfoTool
+    )
+    from mini_agent.web.server import get_app_config
+    from mini_agent.config import Config
+    from mini_agent.cli import initialize_base_tools, add_workspace_tools
+    
+    app_config = get_app_config()
+    project_root = Path(__file__).parent.parent.parent
+    workspace_dir = project_root / "workspace"
+    
+    tools = []
+    skill_loader = None
+    
+    import asyncio
+    
+    try:
+        tools, skill_loader = asyncio.run(
+            initialize_base_tools(app_config)
+        )
+        add_workspace_tools(tools, app_config, workspace_dir)
+    except Exception as e:
+        logger.error(f"加载工具失败: {e}")
+        if app_config.tools.enable_bash:
+            tools.append(BashTool(workspace_dir=str(workspace_dir)))
+        if app_config.tools.enable_file_tools:
+            tools.extend([
+                ReadTool(workspace_dir=str(workspace_dir)),
+                WriteTool(workspace_dir=str(workspace_dir)),
+                EditTool(workspace_dir=str(workspace_dir)),
+                DocumentParseTool(),
+                DocumentInfoTool()
+            ])
+        if app_config.tools.enable_note:
+            tools.append(SessionNoteTool(memory_file=str(workspace_dir / ".agent_memory.json")))
+    
+    _cached_tools = tools
+    _cached_skill_loader = skill_loader
+    
+    return tools, skill_loader
+
+
+def get_system_prompt(skill_loader=None):
+    """获取系统提示词，包含Skills元数据.
+    
+    复用 cli.py 中的系统提示词加载逻辑.
+    """
+    from pathlib import Path
+    from mini_agent.config import Config
+    from mini_agent.web.server import get_app_config
+    
+    app_config = get_app_config()
+    
+    system_prompt_path = Config.find_config_file(app_config.agent.system_prompt_path)
+    if system_prompt_path and system_prompt_path.exists():
+        system_prompt = system_prompt_path.read_text(encoding="utf-8")
+    else:
+        system_prompt = "You are Mini-Agent, an intelligent assistant."
+    
+    if skill_loader:
+        skills_metadata = skill_loader.get_skills_metadata_prompt()
+        if skills_metadata:
+            system_prompt = system_prompt.replace("{SKILLS_METADATA}", skills_metadata)
+        else:
+            system_prompt = system_prompt.replace("{SKILLS_METADATA}", "")
+    else:
+        system_prompt = system_prompt.replace("{SKILLS_METADATA}", "")
+    
+    return system_prompt
+
+
+def get_workspace_dir():
+    """获取工作目录."""
+    from pathlib import Path
+    project_root = Path(__file__).parent.parent.parent
+    return str(project_root / "workspace")
+
+
 def create_session_agent(session_id: str, llm_client, tools, system_prompt: str, max_steps: int, workspace_dir: str) -> Agent:
     """为会话创建Agent实例并缓存."""
     agent = Agent(
@@ -102,6 +223,38 @@ def get_or_create_agent(
         )
     
     return agent
+
+
+def get_or_create_agent_for_session(session_id: str) -> Agent:
+    """获取或创建会话的Agent实例."""
+    agent = get_session_agent(session_id)
+    
+    if agent is None:
+        agent = create_agent_for_session(session_id)
+    
+    return agent
+
+
+def create_agent_for_session(session_id: str) -> Agent:
+    """为会话创建Agent实例（自动获取所有组件）."""
+    from mini_agent.web.server import get_app_config
+    
+    app_config = get_app_config()
+    
+    llm_client = get_llm_client()
+    tools, skill_loader = get_tools()
+    system_prompt = get_system_prompt(skill_loader)
+    workspace_dir = get_workspace_dir()
+    max_steps = app_config.agent.max_steps
+    
+    return create_session_agent(
+        session_id,
+        llm_client,
+        tools,
+        system_prompt,
+        max_steps,
+        workspace_dir,
+    )
 
 
 async def chat_stream_generator(
@@ -343,11 +496,6 @@ async def chat_stream_generator(
 async def chat_non_stream(
     request: ChatRequest,
     db: Database,
-    llm_client,
-    tools,
-    system_prompt: str,
-    max_steps: int,
-    workspace_dir: str,
 ):
     """非流式聊天处理."""
     from datetime import datetime
@@ -385,15 +533,7 @@ async def chat_non_stream(
     }
     db.add_message(session_id, user_message)
     
-    from mini_agent.web.service.chat_service import get_or_create_agent
-    agent = get_or_create_agent(
-        session_id,
-        llm_client,
-        tools,
-        system_prompt,
-        max_steps,
-        workspace_dir,
-    )
+    agent = get_or_create_agent_for_session(session_id)
     
     tool_list = list(agent.tools.values())
     

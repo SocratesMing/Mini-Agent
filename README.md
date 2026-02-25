@@ -203,6 +203,14 @@ uv tool install -e .
 # After installation, run from anywhere and code changes take effect immediately
 mini-agent
 mini-agent --workspace /path/to/your/project
+
+# run agent UI 
+# require node >=24
+cd .\frontend\
+npm install
+npm run de
+
+
 ```
 
 > 📖 For more development guidance, see [Development Guide](docs/DEVELOPMENT_GUIDE.md)

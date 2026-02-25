@@ -1,13 +1,6 @@
 <template>
   <div class="message" :class="[message.role]">
     <div class="message-content">
-      <!-- 加载状态 -->
-      <div v-if="message.loading && sortedBlocks.length === 0 && !message.content" class="loading-indicator">
-        <span class="dot"></span>
-        <span class="dot"></span>
-        <span class="dot"></span>
-      </div>
-      
       <!-- 文件卡片 -->
       <div v-if="message.files && message.files.length > 0" class="files-container">
         <div 

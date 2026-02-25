@@ -16,15 +16,17 @@
 # - Global: https://platform.minimax.io -> api_base: https://api.minimax.io
 # - China: https://platform.minimaxi.com -> api_base: https://api.minimaxi.com
 # Please choose based on your network environment and get API key from corresponding platform
-api_key: "YOUR_API_KEY_HERE"  # Replace with your MiniMax API Key
-api_base: "https://api.minimax.io"   # Global users (default)
-# api_base: "https://api.minimaxi.com"  # China users
-model: "MiniMax-M2.5"
-# LLM provider: "anthropic" or "openai"
-# For MiniMax API, the suffix (/anthropic or /v1) is auto-appended based on provider.
-# For third-party APIs (e.g., https://api.siliconflow.cn/v1), api_base is used as-is.
-provider: "anthropic"  # Default: anthropic
 
+# api_key: ""  # Replace with your MiniMax API Key
+# api_base: "https://api.minimaxi.com"  # China users
+# model: "MiniMax-M2.5"
+# provider: "anthropic"  # Default: anthropic
+
+api_key: ""  # Replace with your MiniMax API Key
+api_base: "https://api.deepseek.com/v1"   # Global users (default)
+model: "deepseek-reasoner"
+LLM provider: "openai"
+provider: "deepseek"  # Default: anthropic
 # ===== Retry Configuration =====
 retry:
   enabled: true           # Enable retry mechanism

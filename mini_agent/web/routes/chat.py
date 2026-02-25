@@ -18,7 +18,7 @@ from mini_agent.web.models import (
     ChatRequest,
     ChatResponse,
 )
-from mini_agent.web.service import get_or_create_agent, remove_session_agent, chat_stream_generator
+from mini_agent.web.service import get_or_create_agent_for_session, chat_stream_generator, remove_session_agent
 
 logger = logging.getLogger(__name__)
 
@@ -125,79 +125,7 @@ async def chat_stream(
         except Exception as e:
             logger.error(f"[{sid}] 文件解析出错: {str(e)}")
     
-    from mini_agent.web.server import get_app_config
-    app_config = get_app_config()
-    
-    try:
-        from mini_agent.llm import LLMClient
-        from mini_agent.schema import LLMProvider
-        
-        provider = LLMProvider.ANTHROPIC if app_config.llm.provider == "anthropic" else LLMProvider.OPENAI
-        llm_client = LLMClient(
-            api_key=app_config.llm.api_key,
-            provider=provider,
-            api_base=app_config.llm.api_base,
-            model=app_config.llm.model,
-            retry_config=app_config.llm.retry,
-        )
-    except Exception as e:
-        logger.error(f"[{sid}] LLM客户端创建失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"获取LLM客户端失败: {str(e)}")
-    
-    try:
-        from mini_agent.tools import BashTool, ReadTool, WriteTool, EditTool, SessionNoteTool, DocumentParseTool, DocumentInfoTool
-        from pathlib import Path
-        import os
-        
-        tools = []
-        project_root = Path(__file__).parent.parent.parent
-        
-        if app_config.tools.enable_bash:
-            tools.append(BashTool())
-        
-        if app_config.tools.enable_file_tools:
-            tools.extend([
-                ReadTool(workspace_dir=str(project_root / "workspace")),
-                WriteTool(workspace_dir=str(project_root / "workspace")),
-                EditTool(workspace_dir=str(project_root / "workspace")),
-                DocumentParseTool(),
-                DocumentInfoTool()
-            ])
-        
-        if app_config.tools.enable_note:
-            tools.append(SessionNoteTool(memory_file=str(project_root / "workspace" / ".agent_memory.json")))
-    except Exception as e:
-        logger.error(f"[{sid}] 工具加载失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"获取工具列表失败: {str(e)}")
-    
-    try:
-        system_prompt = ""
-        if app_config.agent.system_prompt_path:
-            import os
-            prompt_path = app_config.agent.system_prompt_path
-            if os.path.exists(prompt_path):
-                with open(prompt_path, 'r', encoding='utf-8') as f:
-                    system_prompt = f.read()
-        
-        components = {
-            "llm_client": llm_client,
-            "tools": tools,
-            "system_prompt": system_prompt,
-            "max_steps": app_config.agent.max_steps,
-            "workspace_dir": app_config.agent.workspace_dir,
-        }
-    except Exception as e:
-        logger.error(f"[{sid}] Agent组件加载失败: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"获取Agent组件失败: {str(e)}")
-    
-    agent = get_or_create_agent(
-        session_id,
-        components["llm_client"],
-        components["tools"],
-        components["system_prompt"],
-        components["max_steps"],
-        components["workspace_dir"],
-    )
+    agent = get_or_create_agent_for_session(session_id)
     
     return StreamingResponse(
         chat_stream_generator(
