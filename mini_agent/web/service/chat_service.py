@@ -123,12 +123,22 @@ def get_tools():
     tools = []
     skill_loader = None
     
-    import asyncio
-    
     try:
-        tools, skill_loader = asyncio.run(
-            initialize_base_tools(app_config)
-        )
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        
+        if loop is not None:
+            import concurrent.futures
+            def run_async():
+                return asyncio.run(initialize_base_tools(app_config))
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                tools, skill_loader = executor.submit(run_async).result()
+        else:
+            tools, skill_loader = asyncio.run(
+                initialize_base_tools(app_config)
+            )
         add_workspace_tools(tools, app_config, workspace_dir)
     except Exception as e:
         logger.error(f"加载工具失败: {e}")

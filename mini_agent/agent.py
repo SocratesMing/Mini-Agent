@@ -638,6 +638,7 @@ Requirements:
 
                     if function_name not in self.tools:
                         logger.error(f"[{sid}] 未知工具: {function_name}")
+                        tool_start_time = time.time()
                         result = ToolResult(
                             success=False,
                             content="",
