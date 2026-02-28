@@ -144,6 +144,20 @@
         </div>
 
         <div v-if="message.content" class="message-text" v-html="renderMarkdown(message.content)"></div>
+        
+        <!-- 生成的文件按钮 -->
+        <div v-if="message.role === 'assistant' && message.generated_files && message.generated_files.length > 0" class="generated-files-btn-container">
+          <button class="generated-files-btn" @click="emit('viewGeneratedFiles')" title="查看生成的文件">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+            <span>查看生成的文件 ({{ message.generated_files.length }})</span>
+          </button>
+        </div>
       </template>
       
       <!-- 用户消息显示复制按钮 -->
@@ -172,7 +186,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['removeFile'])
+const emit = defineEmits(['removeFile', 'viewGeneratedFiles'])
 
 const showThinking = ref(true)
 const expandedThinking = ref({})
@@ -1102,6 +1116,36 @@ onMounted(() => {
 
 .message-actions .copy-btn:hover svg {
   color: #0ea5e9;
+}
+
+.generated-files-btn-container {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.generated-files-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 8px;
+  color: #166534;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.generated-files-btn:hover {
+  background: #dcfce7;
+  border-color: #4ade80;
+}
+
+.generated-files-btn svg {
+  width: 18px;
+  height: 18px;
 }
 
 .message-text :deep(.code-block-wrapper) {

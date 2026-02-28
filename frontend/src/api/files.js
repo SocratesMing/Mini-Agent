@@ -83,6 +83,41 @@ export async function getUserProfile() {
   return await response.json()
 }
 
+export async function getSessionGeneratedFiles(sessionId) {
+  const response = await fetch(`${API_BASE_URL}/api/files/session/${sessionId}`)
+  
+  if (!response.ok) {
+    throw new Error('获取生成的文件失败')
+  }
+  
+  return await response.json()
+}
+
+export async function getFileContent(filePath) {
+  const response = await fetch(`${API_BASE_URL}/api/files/content?file_path=${encodeURIComponent(filePath)}`)
+  
+  if (!response.ok) {
+    throw new Error('获取文件内容失败')
+  }
+  
+  const text = await response.text()
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
+}
+
+export function downloadFile(filePath, fileName) {
+  const url = `${API_BASE_URL}/api/files/download?file_path=${encodeURIComponent(filePath)}`
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+}
+
 export async function updateUserProfile(data) {
   const response = await fetch(`${API_BASE_URL}/api/user/profile`, {
     method: 'PUT',

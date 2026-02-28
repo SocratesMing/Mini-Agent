@@ -185,6 +185,27 @@ class Database:
                 cursor.execute("ALTER TABLE session_files ADD COLUMN username TEXT DEFAULT ''")
             
             cursor.execute("""
+                CREATE TABLE IF NOT EXISTS generated_files (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    message_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    file_path TEXT NOT NULL,
+                    file_type TEXT NOT NULL,
+                    size INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+                )
+            """)
+            
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_generated_files_session ON generated_files(session_id)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_generated_files_message ON generated_files(session_id, message_id)
+            """)
+            
+            cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_session_files_session ON session_files(session_id)
             """)
             cursor.execute("""
@@ -505,6 +526,100 @@ class Database:
                 (result, 1 if success else 0, session_id, message_id, tool_call_id)
             )
             return cursor.rowcount > 0
+
+    def add_generated_file(
+        self,
+        session_id: str,
+        message_id: str,
+        filename: str,
+        file_path: str,
+        file_type: str,
+        size: int,
+    ) -> int:
+        """添加生成的文件记录.
+
+        Args:
+            session_id: 会话ID
+            message_id: 消息ID
+            filename: 文件名
+            file_path: 文件路径
+            file_type: 文件类型
+            size: 文件大小
+
+        Returns:
+            记录ID
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO generated_files 
+                (session_id, message_id, filename, file_path, file_type, size, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    message_id,
+                    filename,
+                    file_path,
+                    file_type,
+                    size,
+                    datetime.now().isoformat(),
+                )
+            )
+            return cursor.lastrowid
+
+    def get_generated_files(
+        self,
+        session_id: str,
+        message_id: Optional[str] = None
+    ) -> list[dict[str, Any]]:
+        """获取生成的文件列表.
+
+        Args:
+            session_id: 会话ID
+            message_id: 消息ID（可选）
+
+        Returns:
+            文件列表
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if message_id:
+                cursor.execute(
+                    """
+                    SELECT id, session_id, message_id, filename, file_path, file_type, size, created_at
+                    FROM generated_files
+                    WHERE session_id = ? AND message_id = ?
+                    ORDER BY created_at DESC
+                    """,
+                    (session_id, message_id)
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT id, session_id, message_id, filename, file_path, file_type, size, created_at
+                    FROM generated_files
+                    WHERE session_id = ?
+                    ORDER BY created_at DESC
+                    """,
+                    (session_id,)
+                )
+            
+            rows = cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "session_id": row[1],
+                    "message_id": row[2],
+                    "filename": row[3],
+                    "file_path": row[4],
+                    "file_type": row[5],
+                    "size": row[6],
+                    "created_at": row[7],
+                }
+                for row in rows
+            ]
 
     def add_session_file(
         self,

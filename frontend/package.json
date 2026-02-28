@@ -9,11 +9,20 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@vueuse/core": "^14.2.1",
+    "docx": "^9.6.0",
+    "docx-preview": "^0.3.7",
     "highlight.js": "^11.11.1",
-    "marked": "^17.0.1",
+    "jspdf": "^4.2.0",
+    "markdown-it": "^14.1.1",
+    "marked": "^17.0.3",
+    "monaco-editor": "^0.55.1",
+    "pdfjs-dist": "^3.11.174",
     "shiki": "^3.22.0",
+    "vite-plugin-monaco-editor": "^1.1.0",
     "vue": "^3.5.25",
-    "vue-markdown-render": "^2.3.0"
+    "vue-markdown-render": "^2.3.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@iconify/json": "^2.2.441",

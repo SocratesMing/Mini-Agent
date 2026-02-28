@@ -5,5 +5,6 @@
 
 from mini_agent.web.routes.sessions import router as sessions_router
 from mini_agent.web.routes.chat import router as chat_router
+from mini_agent.web.routes.files import router as files_router
 
-__all__ = ["sessions_router", "chat_router"]
+__all__ = ["sessions_router", "chat_router", "files_router"]

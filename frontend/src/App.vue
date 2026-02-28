@@ -44,6 +44,7 @@
         v-else-if="!showAssets && !showUserProfile"
         :messages="messages"
         :currentSessionId="currentSessionId"
+        :hasFiles="currentSessionHasFiles"
         :isStreaming="isStreaming"
         :scrollTrigger="scrollTrigger"
         @sendMessage="handleSendMessage"
@@ -79,10 +80,11 @@ import AssetsPanel from './components/AssetsPanel.vue'
 import UserProfile from './components/UserProfile.vue'
 import Welcome from './components/Welcome.vue'
 import { createSession, listSessions, getChatHistory, deleteSession, sendMessage, renameSession } from './api/chat.js'
-import { uploadFile, deleteFile, getUserProfile } from './api/files.js'
+import { uploadFile, deleteFile, getUserProfile, getSessionGeneratedFiles } from './api/files.js'
 
 const sessions = ref([])
 const currentSessionId = ref(null)
+const currentSessionHasFiles = ref(false)
 const messages = ref([])
 const isStreaming = ref(false)
 const error = ref(null)
@@ -175,6 +177,7 @@ async function handleCreateSession() {
   showAssets.value = false
   currentSessionId.value = null
   messages.value = []
+  currentSessionHasFiles.value = false
 }
 
 async function handleSelectSession(sessionId) {
@@ -185,9 +188,13 @@ async function handleSelectSession(sessionId) {
     const history = await getChatHistory(sessionId)
     messages.value = history.messages || []
     scrollTrigger.value++
+    
+    const files = await getSessionGeneratedFiles(sessionId)
+    currentSessionHasFiles.value = files && files.length > 0
   } catch (e) {
     console.error('加载聊天历史失败:', e)
     error.value = '加载聊天历史失败'
+    currentSessionHasFiles.value = false
   }
 }
 
@@ -402,7 +409,8 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
               content: finalContent,
               created_at: new Date().toISOString(),
               loading: false,
-              thinking_duration: data.thinking_duration || messages.value[idx].thinking_duration
+              thinking_duration: data.thinking_duration || messages.value[idx].thinking_duration,
+              generated_files: data.generated_files || []
             }
           }
         }
@@ -424,6 +432,9 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
         }
       }
     }, signal, enableDeepThink, files)
+    
+    const generatedFiles = await getSessionGeneratedFiles(currentSessionId.value)
+    currentSessionHasFiles.value = generatedFiles && generatedFiles.length > 0
   } catch (e) {
     if (e.name === 'AbortError') {
       return

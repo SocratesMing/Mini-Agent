@@ -96,16 +96,30 @@ def get_llm_client():
     return _cached_llm_client
 
 
-def get_tools():
+def get_tools(session_id: str = None, username: str = None):
     """获取工具列表，包括基础工具和Skills（带缓存）.
+    
+    Args:
+        session_id: 会话ID，如果提供则创建会话隔离的工作目录
+        username: 用户名，与session_id配合使用
     
     复用 cli.py 中的 initialize_base_tools 和 add_workspace_tools 函数.
     """
     global _cached_tools, _cached_skill_loader
     
+    # 如果传入了session_id和username，则创建会话隔离的工具
+    if session_id and username:
+        workspace_dir = get_workspace_dir(session_id, username)
+        return create_tools_with_workspace(workspace_dir)
+    
     if _cached_tools is not None:
         return _cached_tools, _cached_skill_loader
     
+    return _get_tools_internal()
+
+
+def _get_tools_internal():
+    """内部函数：获取工具列表（不缓存）."""
     from pathlib import Path
     from mini_agent.tools import (
         BashTool,
@@ -155,8 +169,66 @@ def get_tools():
         if app_config.tools.enable_note:
             tools.append(SessionNoteTool(memory_file=str(workspace_dir / ".agent_memory.json")))
     
-    _cached_tools = tools
-    _cached_skill_loader = skill_loader
+    return tools, skill_loader
+
+
+def create_tools_with_workspace(workspace_dir: str):
+    """为指定工作目录创建工具实例.
+    
+    Args:
+        workspace_dir: 工作目录路径
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    from pathlib import Path
+    from mini_agent.tools import (
+        BashTool,
+        ReadTool, WriteTool, EditTool,
+        SessionNoteTool, DocumentParseTool, DocumentInfoTool
+    )
+    from mini_agent.web.server import get_app_config
+    from mini_agent.cli import initialize_base_tools, add_workspace_tools
+    
+    logger.info(f"create_tools_with_workspace: {workspace_dir}")
+    
+    app_config = get_app_config()
+    workspace_path = Path(workspace_dir)
+    
+    tools = []
+    skill_loader = None
+    
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        
+        if loop is not None:
+            import concurrent.futures
+            def run_async():
+                return asyncio.run(initialize_base_tools(app_config))
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                tools, skill_loader = executor.submit(run_async).result()
+        else:
+            tools, skill_loader = asyncio.run(
+                initialize_base_tools(app_config)
+            )
+        add_workspace_tools(tools, app_config, workspace_path)
+    except Exception as e:
+        logger.error(f"加载工具失败: {e}")
+        if app_config.tools.enable_bash:
+            tools.append(BashTool(workspace_dir=str(workspace_dir)))
+        if app_config.tools.enable_file_tools:
+            tools.extend([
+                ReadTool(workspace_dir=str(workspace_dir)),
+                WriteTool(workspace_dir=str(workspace_dir)),
+                EditTool(workspace_dir=str(workspace_dir)),
+                DocumentParseTool(),
+                DocumentInfoTool()
+            ])
+        if app_config.tools.enable_note:
+            tools.append(SessionNoteTool(memory_file=str(workspace_path / ".agent_memory.json")))
     
     return tools, skill_loader
 
@@ -190,11 +262,23 @@ def get_system_prompt(skill_loader=None):
     return system_prompt
 
 
-def get_workspace_dir():
-    """获取工作目录."""
+def get_workspace_dir(session_id: str, username: str = None):
+    """获取工作目录.
+    
+    Args:
+        session_id: 会话ID
+        username: 用户名，如果提供则返回 username/session_id 隔离的目录
+    """
     from pathlib import Path
     project_root = Path(__file__).parent.parent.parent
-    return str(project_root / "workspace")
+    workspace = project_root / "workspace"
+    
+    if username:
+        safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
+        session_workspace = workspace / safe_username / session_id
+        return str(session_workspace)
+    
+    return str(workspace)
 
 
 def create_session_agent(session_id: str, llm_client, tools, system_prompt: str, max_steps: int, workspace_dir: str) -> Agent:
@@ -235,26 +319,48 @@ def get_or_create_agent(
     return agent
 
 
-def get_or_create_agent_for_session(session_id: str) -> Agent:
+def get_or_create_agent_for_session(session_id: str, http_request=None) -> Agent:
     """获取或创建会话的Agent实例."""
     agent = get_session_agent(session_id)
     
     if agent is None:
-        agent = create_agent_for_session(session_id)
+        username = None
+        if http_request:
+            from mini_agent.web.database import Database
+            db = Database()
+            user = db.get_or_create_default_user()
+            username = user.username
+        
+        logger.info(f"为会话 {session_id} 创建工具，username={username}")
+        tools, skill_loader = get_tools(session_id, username)
+        
+        workspace_dir = get_workspace_dir(session_id, username)
+        from pathlib import Path
+        Path(workspace_dir).mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"工具创建完成，使用工作目录: {workspace_dir}")
+        agent = create_agent_for_session(session_id, workspace_dir, tools, skill_loader)
     
     return agent
 
 
-def create_agent_for_session(session_id: str) -> Agent:
-    """为会话创建Agent实例（自动获取所有组件）."""
+def create_tools_for_workspace(workspace_dir: str) -> list:
+    """为指定的工作目录创建工具实例.
+    
+    内部调用 get_tools() 并返回工具列表.
+    """
+    tools, _ = get_tools()
+    return tools
+
+
+def create_agent_for_session(session_id: str, workspace_dir: str, tools: list, skill_loader = None) -> Agent:
+    """为会话创建Agent实例."""
     from mini_agent.web.server import get_app_config
     
     app_config = get_app_config()
     
     llm_client = get_llm_client()
-    tools, skill_loader = get_tools()
     system_prompt = get_system_prompt(skill_loader)
-    workspace_dir = get_workspace_dir()
     max_steps = app_config.agent.max_steps
     
     return create_session_agent(
@@ -403,7 +509,6 @@ async def chat_stream_generator(
                 tool_duration = event.get("duration")
                 
                 if tool_call_id:
-                    db_start = time.time()
                     db.update_tool_call_result(
                         session_id=session_id,
                         message_id=message_id,
@@ -411,6 +516,31 @@ async def chat_stream_generator(
                         result=result,
                         success=success
                     )
+                
+                if tool_name == "write_file" and success:
+                    import re
+                    match = re.search(r'Successfully wrote to (.+)', result)
+                    if match:
+                        file_path = match.group(1).strip()
+                        logger.info(f"[{sid}] 检测到文件写入: {file_path}")
+                        try:
+                            from pathlib import Path
+                            p = Path(file_path)
+                            if p.exists():
+                                file_size = p.stat().st_size
+                                db.add_generated_file(
+                                    session_id=session_id,
+                                    message_id=message_id,
+                                    filename=p.name,
+                                    file_path=str(p),
+                                    file_type=p.suffix.lstrip('.') or 'file',
+                                    size=file_size,
+                                )
+                                logger.info(f"[{sid}] 文件记录成功: {p.name}")
+                            else:
+                                logger.warning(f"[{sid}] 文件不存在: {file_path}")
+                        except Exception as e:
+                            logger.error(f"记录生成文件失败: {e}")
                 
                 content_blocks.append({
                     "type": "tool_result",
@@ -460,6 +590,8 @@ async def chat_stream_generator(
                 
                 db.add_message(session_id, assistant_message)
                 
+                generated_files = db.get_generated_files(session_id, message_id)
+                
                 done_event = {
                     'type': 'done', 
                     'session_id': session_id, 
@@ -468,7 +600,8 @@ async def chat_stream_generator(
                     'steps': steps, 
                     'tool_calls': tool_calls,
                     'thinking': thinking_content,
-                    'thinking_duration': thinking_duration_value
+                    'thinking_duration': thinking_duration_value,
+                    'generated_files': generated_files
                 }
                 yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
             elif event_type == "error":

@@ -125,7 +125,7 @@ async def chat_stream(
         except Exception as e:
             logger.error(f"[{sid}] 文件解析出错: {str(e)}")
     
-    agent = get_or_create_agent_for_session(session_id)
+    agent = get_or_create_agent_for_session(session_id, request)
     
     return StreamingResponse(
         chat_stream_generator(

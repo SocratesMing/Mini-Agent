@@ -139,30 +139,122 @@ c.line(100, height - 140, 400, height - 140)
 c.save()
 ```
 
-#### Create PDF with Multiple Pages
+#### Create PDF with Chinese Support (IMPORTANT for Chinese content)
 ```python
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.units import cm
+import os
 
-doc = SimpleDocTemplate("report.pdf", pagesize=letter)
+# Register Chinese font - try common system fonts
+def get_chinese_font():
+    """Get available Chinese font path"""
+    font_paths = [
+        # Windows
+        "C:/Windows/Fonts/simhei.ttf",  # 黑体
+        "C:/Windows/Fonts/simsun.ttc",  # 宋体
+        "C:/Windows/Fonts/msyh.ttc",    # 微软雅黑
+        # macOS
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        # Linux
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    ]
+    for path in font_paths:
+        if os.path.exists(path):
+            return path
+    return None
+
+# Register font
+font_path = get_chinese_font()
+if font_path:
+    pdfmetrics.registerFont(TTFont('ChineseFont', font_path))
+    chinese_font = 'ChineseFont'
+else:
+    chinese_font = 'Helvetica'  # Fallback
+
+# Create PDF with Chinese text
+c = canvas.Canvas("chinese_document.pdf", pagesize=A4)
+width, height = A4
+
+# Set font for Chinese content
+c.setFont(chinese_font, 12)
+c.drawString(2*cm, height - 2*cm, "这是中文测试内容")
+c.drawString(2*cm, height - 3*cm, "Hello World 你好世界")
+
+c.save()
+```
+
+#### Create PDF with Multiple Pages (Chinese Support)
+```python
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+import os
+
+# Register Chinese font
+def get_chinese_font():
+    font_paths = [
+        "C:/Windows/Fonts/simhei.ttf",
+        "C:/Windows/Fonts/simsun.ttc",
+        "C:/Windows/Fonts/msyh.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    ]
+    for path in font_paths:
+        if os.path.exists(path):
+            return path
+    return None
+
+font_path = get_chinese_font()
+if font_path:
+    pdfmetrics.registerFont(TTFont('ChineseFont', font_path))
+
+# Create styles with Chinese font
 styles = getSampleStyleSheet()
+
+# Create Chinese styles
+chinese_title_style = ParagraphStyle(
+    'ChineseTitle',
+    parent=styles['Title'],
+    fontName='ChineseFont' if font_path else 'Helvetica',
+    fontSize=18,
+    alignment=TA_CENTER,
+    spaceAfter=12
+)
+
+chinese_normal_style = ParagraphStyle(
+    'ChineseNormal',
+    parent=styles['Normal'],
+    fontName='ChineseFont' if font_path else 'Helvetica',
+    fontSize=12,
+    leading=18,
+    alignment=TA_LEFT
+)
+
+# Build document
+doc = SimpleDocTemplate("chinese_report.pdf", pagesize=A4)
 story = []
 
-# Add content
-title = Paragraph("Report Title", styles['Title'])
-story.append(title)
+# Add Chinese content
+story.append(Paragraph("中文报告标题", chinese_title_style))
 story.append(Spacer(1, 12))
-
-body = Paragraph("This is the body of the report. " * 20, styles['Normal'])
-story.append(body)
+story.append(Paragraph("这是报告正文内容，支持中文显示。", chinese_normal_style))
+story.append(Paragraph("可以包含多段文字，每段都会正确换行和显示。", chinese_normal_style))
 story.append(PageBreak())
 
 # Page 2
-story.append(Paragraph("Page 2", styles['Heading1']))
-story.append(Paragraph("Content for page 2", styles['Normal']))
+story.append(Paragraph("第二页", chinese_title_style))
+story.append(Paragraph("第二页的内容", chinese_normal_style))
 
-# Build PDF
 doc.build(story)
 ```
 
