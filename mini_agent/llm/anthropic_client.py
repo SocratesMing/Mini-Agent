@@ -345,7 +345,6 @@ class AnthropicClient(LLMClientBase):
                 if event.delta.type == "text_delta":
                     if thinking_started and thinking_start_time:
                         thinking_duration_value = round(time.time() - thinking_start_time, 1)
-                        logger.info(f"思考结束 | 用时: {thinking_duration_value}s")
                         yield {"type": "thinking_end", "duration": thinking_duration_value}
                         thinking_started = False
                     content_length += len(event.delta.text)
@@ -355,7 +354,6 @@ class AnthropicClient(LLMClientBase):
                     if not thinking_started:
                         thinking_started = True
                         thinking_start_time = time.time()
-                        logger.info(f"思考开始")
                         yield {"type": "thinking_start", "content": ""}
                     thinking_length += len(event.delta.thinking)
                     full_thinking += event.delta.thinking
@@ -375,7 +373,6 @@ class AnthropicClient(LLMClientBase):
                         if not thinking_started:
                             thinking_started = True
                             thinking_start_time = time.time()
-                            logger.info(f"思考开始")
                             yield {"type": "thinking_start", "content": ""}
                         if hasattr(event.content_block, "thinking"):
                             thinking_length += len(event.content_block.thinking)
@@ -384,7 +381,6 @@ class AnthropicClient(LLMClientBase):
                     elif event.content_block.type == "text":
                         if thinking_started and thinking_start_time:
                             thinking_duration_value = round(time.time() - thinking_start_time, 1)
-                            logger.info(f"思考结束 | 用时: {thinking_duration_value}s")
                             yield {"type": "thinking_end", "duration": thinking_duration_value}
                             thinking_started = False
                         if hasattr(event.content_block, "text"):
@@ -418,15 +414,12 @@ class AnthropicClient(LLMClientBase):
         
         if thinking_started and thinking_start_time:
             thinking_duration_value = round(time.time() - thinking_start_time, 1)
-            logger.info(f"思考结束 | 用时: {thinking_duration_value}s")
             yield {"type": "thinking_end", "duration": thinking_duration_value}
         
-        logger.info(f"完成 | content={content_length} | thinking={thinking_length} | thinking_duration={thinking_duration_value} | tool_calls={len(tool_calls)}")
+        logger.info(f"思考完成 | content={content_length} | thinking={thinking_length} | thinking_duration={thinking_duration_value}s | tool_calls={len(tool_calls)}")
         
         if full_thinking:
-            logger.info(f"思考内容:\n{full_thinking}")
-        if full_content:
-            logger.info(f"正式内容:\n{full_content}")
+            logger.info(f"思考内容: {full_thinking}")
         if tool_calls:
             for tc in tool_calls:
                 logger.info(f"工具调用: {tc['name']} | 参数: {json.dumps(tc['arguments'], ensure_ascii=False)}")

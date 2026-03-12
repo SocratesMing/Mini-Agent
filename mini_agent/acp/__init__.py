@@ -97,6 +97,8 @@ class MiniMaxACPAgent:
         workspace = Path(params.cwd or self._config.agent.workspace_dir).expanduser()
         if not workspace.is_absolute():
             workspace = workspace.resolve()
+        from mini_agent.config import Config
+        Config.set_workspace_dir(workspace)
         tools = list(self._base_tools)
         add_workspace_tools(tools, self._config, workspace)
         agent = Agent(llm_client=self._llm, system_prompt=self._system_prompt, tools=tools, max_steps=self._config.agent.max_steps, workspace_dir=str(workspace))

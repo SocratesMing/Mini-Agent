@@ -240,6 +240,30 @@ async def delete_session(
     
     db.delete_session(session_id)
     
+    from mini_agent.config import Config
+    
+    env_workspace = Config.get_workspace_dir()
+    if env_workspace:
+        workspace = Path(env_workspace)
+    else:
+        project_root = Path(__file__).parent.parent.parent
+        workspace = project_root / "workspace"
+    
+    from mini_agent.web.database import Database
+    db_for_user = Database()
+    user = db_for_user.get_or_create_default_user()
+    username = user.username
+    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
+    session_workspace = workspace / safe_username / session_id
+    
+    if session_workspace.exists() and session_workspace.is_dir():
+        try:
+            import shutil
+            shutil.rmtree(session_workspace)
+            logger.info(f"删除会话工作目录 | 会话: {session_id} | 路径: {session_workspace}")
+        except Exception as e:
+            logger.error(f"删除会话工作目录失败 | 会话: {session_id} | 路径: {session_workspace} | 错误: {e}")
+    
     logger.info(f"删除会话 | 会话ID: {session_id} | 标题: {session.title} | 删除文件数: {len(deleted_files)}")
     
     return DeleteSessionResponse(
@@ -299,7 +323,15 @@ async def upload_file(
     
     safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
     
-    upload_dir = Path("workspace") / "users" / safe_username / "files"
+    from mini_agent.config import Config
+    
+    env_workspace = Config.get_workspace_dir()
+    if env_workspace:
+        workspace = Path(env_workspace)
+    else:
+        workspace = Path("workspace")
+    
+    upload_dir = workspace / "users" / safe_username / "files"
     upload_dir.mkdir(parents=True, exist_ok=True)
     
     filename = file.filename or "unknown"

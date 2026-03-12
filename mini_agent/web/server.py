@@ -5,19 +5,23 @@
 """
 
 import asyncio
-import logging
-import os
-import sys
-import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
+import logging
+import os
 from pathlib import Path
+import sys
 from typing import Optional
+import uuid
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from mini_agent.web.database import Database, init_database as init_db
+from mini_agent.web.routes.chat import router as chat_router
+from mini_agent.web.routes.files import router as files_router
+from mini_agent.web.routes.sessions import router as sessions_router
+from mini_agent.web.routes.user import router as user_router
 
 
 agent_config = None
@@ -37,7 +41,7 @@ def setup_logging():
     log_file = log_dir / "mini_agent.log"
     
     formatter = logging.Formatter(
-        fmt="%(asctime)s [%(levelname)s] %(filename)s:%(lineno)d: %(message)s",
+        fmt="%(asctime)s.%(msecs)03d [%(levelname)s] %(filename)s:%(lineno)d: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S"
     )
     
@@ -128,6 +132,8 @@ async def lifespan(app: FastAPI):
         
         app_config = AppConfig.load()
         
+        AppConfig.set_workspace_dir(app_config.agent.workspace_dir)
+        
         provider = LLMProvider.ANTHROPIC if app_config.llm.provider == "anthropic" else LLMProvider.OPENAI
         llm_client = LLMClient(
             api_key=app_config.llm.api_key,
@@ -185,10 +191,7 @@ app.add_middleware(
 )
 
 
-from mini_agent.web.routes.sessions import router as sessions_router
-from mini_agent.web.routes.chat import router as chat_router
-from mini_agent.web.routes.user import router as user_router
-from mini_agent.web.routes.files import router as files_router
+
 
 app.include_router(sessions_router)
 app.include_router(chat_router)

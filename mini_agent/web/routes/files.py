@@ -95,6 +95,7 @@ async def get_session_generated_files(session_id: str, username: str = None):
     logger = logging.getLogger(__name__)
     
     from pathlib import Path
+    from mini_agent.config import Config
     
     if username is None:
         from mini_agent.web.database import Database
@@ -102,8 +103,12 @@ async def get_session_generated_files(session_id: str, username: str = None):
         user = db.get_or_create_default_user()
         username = user.username
     
-    project_root = Path(__file__).parent.parent.parent
-    workspace = project_root / "workspace"
+    env_workspace = Config.get_workspace_dir()
+    if env_workspace:
+        workspace = Path(env_workspace)
+    else:
+        project_root = Path(__file__).parent.parent.parent
+        workspace = project_root / "workspace"
     
     safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
     session_dir = workspace / safe_username / session_id

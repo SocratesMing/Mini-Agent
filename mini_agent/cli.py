@@ -544,6 +544,8 @@ async def run_agent(workspace_dir: Path, task: str = None,stream: bool = False):
         print(f"{Colors.RED}❌ Error: Failed to load configuration file: {e}{Colors.RESET}")
         return
 
+    Config.set_workspace_dir(config.agent.workspace_dir)
+
     # 2. Initialize LLM client
     from mini_agent.retry import RetryConfig as RetryConfigBase
 
@@ -624,6 +626,7 @@ async def run_agent(workspace_dir: Path, task: str = None,stream: bool = False):
         print_session_info(agent, workspace_dir, config.llm.model)
 
     # 8.5 Non-interactive mode: execute task and exit
+    
     if task:
         print(f"\n{Colors.BRIGHT_BLUE}Agent{Colors.RESET} {Colors.DIM}›{Colors.RESET} {Colors.DIM}Executing task...{Colors.RESET}\n")
         agent.add_user_message(task)
@@ -756,7 +759,6 @@ async def run_agent(workspace_dir: Path, task: str = None,stream: bool = False):
             print(
                 f"\n{Colors.BRIGHT_BLUE}Agent{Colors.RESET} {Colors.DIM}›{Colors.RESET} {Colors.DIM}Thinking... (Esc to cancel){Colors.RESET}\n"
             )
-  
             # Create cancellation event
             cancel_event = asyncio.Event()
             agent.cancel_event = cancel_event
@@ -844,11 +846,16 @@ async def run_agent(workspace_dir: Path, task: str = None,stream: bool = False):
                         if esc_cancelled[0]:
                             cancel_event.set()
                 else:
-                    agent_task = asyncio.create_task(agent.run(user_input, cancel_event=cancel_event))
+                    agent.add_user_message(user_input)
+                    agent_task = asyncio.create_task(agent.run())
+
+                    # Poll for cancellation while agent runs
                     while not agent_task.done():
                         if esc_cancelled[0]:
                             cancel_event.set()
                         await asyncio.sleep(0.1)
+
+                    # Get result
                     _ = agent_task.result()
 
             except asyncio.CancelledError:
@@ -857,7 +864,6 @@ async def run_agent(workspace_dir: Path, task: str = None,stream: bool = False):
                 agent.cancel_event = None
                 esc_listener_stop.set()
                 esc_thread.join(timeout=0.2)
-
             # Visual separation
             print(f"\n{Colors.DIM}{'─' * 60}{Colors.RESET}\n")
 
@@ -897,6 +903,8 @@ def main():
 
     # Ensure workspace directory exists
     workspace_dir.mkdir(parents=True, exist_ok=True)
+
+    Config.set_workspace_dir(workspace_dir)
 
     # Run the agent (config always loaded from package directory)
     asyncio.run(run_agent(workspace_dir,task=args.task, stream=args.stream))

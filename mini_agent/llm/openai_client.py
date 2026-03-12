@@ -356,7 +356,6 @@ class OpenAIClient(LLMClientBase):
                     if not thinking_started:
                         thinking_started = True
                         thinking_start_time = time.time()
-                        logger.info(f"思考开始")
                         yield {"type": "thinking_start", "content": ""}
                     thinking_length += len(delta.reasoning_content)
                     full_thinking += delta.reasoning_content
@@ -365,7 +364,6 @@ class OpenAIClient(LLMClientBase):
                 if delta.content:
                     if thinking_started and thinking_start_time:
                         thinking_duration_value = round(time.time() - thinking_start_time, 1)
-                        logger.info(f"思考结束 | 用时: {thinking_duration_value}s")
                         yield {"type": "thinking_end", "duration": thinking_duration_value}
                         thinking_started = False
                     chunk_count += 1
@@ -420,15 +418,12 @@ class OpenAIClient(LLMClientBase):
         
         if thinking_started and thinking_start_time:
             thinking_duration_value = round(time.time() - thinking_start_time, 1)
-            logger.info(f"思考结束 | 用时: {thinking_duration_value}s")
             yield {"type": "thinking_end", "duration": thinking_duration_value}
         
-        logger.info(f"完成 | chunks={chunk_count} | content={content_length} | thinking={thinking_length} | thinking_duration={thinking_duration_value} | tool_calls={len(final_tool_calls)}")
+        logger.info(f"完成 | chunks={chunk_count} | content={content_length} | thinking={thinking_length} | thinking_duration={thinking_duration_value}s(思考完成) | tool_calls={len(final_tool_calls)}")
         
         if full_thinking:
-            logger.info(f"思考内容:\n{full_thinking}")
-        if full_content:
-            logger.info(f"正式内容:\n{full_content}")
+            logger.info(f"思考内容: {full_thinking}")
         if final_tool_calls:
             for tc in final_tool_calls:
                 logger.info(f"工具调用: {tc['function']['name']} | 参数: {tc['function']['arguments']}")

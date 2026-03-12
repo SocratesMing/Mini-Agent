@@ -3,10 +3,14 @@
 Provides unified configuration loading and management functionality
 """
 
+import os
 from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, Field
+
+
+WORKSPACE_DIR_ENV = "MINI_AGENT_WORKSPACE_DIR"
 
 
 class RetryConfig(BaseModel):
@@ -219,3 +223,22 @@ class Config(BaseModel):
 
         # Fallback to package config directory for error message purposes
         return cls.get_package_dir() / "config" / "config.yaml"
+
+    @staticmethod
+    def set_workspace_dir(workspace_dir: str | Path) -> None:
+        """Set workspace directory to environment variable
+
+        Args:
+            workspace_dir: Workspace directory path
+        """
+        workspace_path = Path(workspace_dir).expanduser().absolute()
+        os.environ[WORKSPACE_DIR_ENV] = str(workspace_path)
+
+    @staticmethod
+    def get_workspace_dir() -> str | None:
+        """Get workspace directory from environment variable
+
+        Returns:
+            Workspace directory path or None if not set
+        """
+        return os.environ.get(WORKSPACE_DIR_ENV)

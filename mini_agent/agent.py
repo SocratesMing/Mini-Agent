@@ -1,20 +1,21 @@
 """Core Agent implementation."""
 
 import asyncio
+from datetime import datetime
 import json
 import logging
-import time
 from pathlib import Path
+import time
 from time import perf_counter
 from typing import AsyncGenerator, Optional
 
 import tiktoken
 
 from .llm import LLMClient
-from .logger import AgentLogger
-from .schema import FunctionCall, LLMResponse, Message, ToolCall
+from .schema import FunctionCall, Message, ToolCall
 from .tools.base import Tool, ToolResult
 from .utils import calculate_display_width
+from .logger import AgentLogger
 
 logger = logging.getLogger("mini_agent.agent")
 
@@ -66,7 +67,6 @@ class Agent:
         self.workspace_dir = Path(workspace_dir)
         self.cancel_event: Optional[asyncio.Event] = None
         self.session_id = session_id or "-----"
-
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
 
         if "Current Workspace" not in system_prompt:
@@ -76,11 +76,117 @@ class Agent:
         self.system_prompt = system_prompt
 
         self.messages: list[Message] = [Message(role="system", content=system_prompt)]
-
         self.logger = AgentLogger()
 
         self.api_total_tokens: int = 0
         self._skip_next_token_check: bool = False
+        self.run_logger = logging.getLogger("mini_agent.agent")
+
+    def _log_message(self, log_type: str, data: dict, level: str = "info"):
+        """Log message using the main logger
+        
+        Args:
+            log_type: Type of log (REQUEST, RESPONSE, TOOL_RESULT)
+            data: Log data to be JSON serialized
+            level: Log level (info, debug, warning, error)
+        """
+        content = f"{log_type}:\n\n"
+        content += json.dumps(data, indent=2, ensure_ascii=False)
+        
+        log_entry = f"\n" + "-" * 80 + f"\n[{log_type}]\n{content}\n"
+        
+        if level == "debug":
+            self.run_logger.debug(log_entry)
+        elif level == "warning":
+            self.run_logger.warning(log_entry)
+        elif level == "error":
+            self.run_logger.error(log_entry)
+        else:
+            self.run_logger.info(log_entry)
+
+    def _log_llm_request(self, messages: list[Message], tools: list[Tool]):
+        """Log LLM request
+        
+        Args:
+            messages: Message list
+            tools: Tool list
+        """
+        request_data = {
+            "messages": [],
+            "tools": [],
+        }
+
+        for msg in messages:
+            msg_dict = {
+                "role": msg.role,
+                "content": msg.content,
+            }
+            if msg.thinking:
+                msg_dict["thinking"] = msg.thinking
+            if msg.tool_calls:
+                msg_dict["tool_calls"] = [tc.model_dump() for tc in msg.tool_calls]
+            if msg.tool_call_id:
+                msg_dict["tool_call_id"] = msg.tool_call_id
+            if msg.name:
+                msg_dict["name"] = msg.name
+
+            request_data["messages"].append(msg_dict)
+
+        if tools:
+            request_data["tools"] = [tool.name for tool in tools]
+
+        self._log_message("REQUEST", request_data, "debug")
+
+    def _log_llm_response(self, content: str, thinking: Optional[str] = None, 
+                         tool_calls: Optional[list[ToolCall]] = None, 
+                         finish_reason: Optional[str] = None):
+        """Log LLM response
+        
+        Args:
+            content: Response content
+            thinking: Thinking content
+            tool_calls: Tool call list
+            finish_reason: Finish reason
+        """
+        response_data = {
+            "content": content,
+        }
+
+        if thinking:
+            response_data["thinking"] = thinking
+
+        if tool_calls:
+            response_data["tool_calls"] = [tc.model_dump() for tc in tool_calls]
+
+        if finish_reason:
+            response_data["finish_reason"] = finish_reason
+
+        self._log_message("RESPONSE", response_data)
+
+    def _log_tool_result(self, tool_name: str, arguments: dict, 
+                        success: bool, content: Optional[str] = None, 
+                        error: Optional[str] = None):
+        """Log tool execution result
+        
+        Args:
+            tool_name: Tool name
+            arguments: Tool arguments
+            success: Whether successful
+            content: Result content
+            error: Error message
+        """
+        tool_result_data = {
+            "tool_name": tool_name,
+            "arguments": arguments,
+            "success": success,
+        }
+
+        if success:
+            tool_result_data["result"] = content
+        else:
+            tool_result_data["error"] = error
+
+        self._log_message("TOOL_RESULT", tool_result_data)
 
     def add_user_message(self, content: str):
         """Add a user message to history."""
@@ -256,22 +362,30 @@ Requirements:
         except Exception as e:
             print(f"{Colors.BRIGHT_RED}✗ Summary generation failed for round {round_num}: {e}{Colors.RESET}")
             return summary_content
+    async def run(self, cancel_event: Optional[asyncio.Event] = None) -> str:
+        """Execute agent loop until task is complete or max steps reached.
 
-    async def run(self, user_message: str = "", cancel_event: Optional[asyncio.Event] = None, enable_deep_think: bool = False) -> str:
-        """Execute agent loop until task is complete or max steps reached."""
+        Args:
+            cancel_event: Optional asyncio.Event that can be set to cancel execution.
+                          When set, the agent will stop at the next safe checkpoint
+                          (after completing the current step to keep messages consistent).
+
+        Returns:
+            The final response content, or error message (including cancellation message).
+        """
+        # Set cancellation event (can also be set via self.cancel_event before calling run())
         if cancel_event is not None:
             self.cancel_event = cancel_event
 
+        # Start new run, initialize log file
         self.logger.start_new_run()
         print(f"{Colors.DIM}📝 Log file: {self.logger.get_log_file_path()}{Colors.RESET}")
-
-        if user_message:
-            self.add_user_message(user_message)
 
         step = 0
         run_start_time = perf_counter()
 
         while step < self.max_steps:
+            # Check for cancellation at start of each step
             if self._check_cancelled():
                 self._cleanup_incomplete_messages()
                 cancel_msg = "Task cancelled by user."
@@ -279,24 +393,30 @@ Requirements:
                 return cancel_msg
 
             step_start_time = perf_counter()
+            # Check and summarize message history to prevent context overflow
             await self._summarize_messages()
 
+            # Step header with proper width calculation
             BOX_WIDTH = 58
             step_text = f"{Colors.BOLD}{Colors.BRIGHT_CYAN}💭 Step {step + 1}/{self.max_steps}{Colors.RESET}"
             step_display_width = calculate_display_width(step_text)
-            padding = max(0, BOX_WIDTH - 1 - step_display_width)
+            padding = max(0, BOX_WIDTH - 1 - step_display_width)  # -1 for leading space
 
             print(f"\n{Colors.DIM}╭{'─' * BOX_WIDTH}╮{Colors.RESET}")
             print(f"{Colors.DIM}│{Colors.RESET} {step_text}{' ' * padding}{Colors.DIM}│{Colors.RESET}")
             print(f"{Colors.DIM}╰{'─' * BOX_WIDTH}╯{Colors.RESET}")
 
+            # Get tool list for LLM call
             tool_list = list(self.tools.values())
+
+            # Log LLM request and call LLM with Tool objects directly
 
             self.logger.log_request(messages=self.messages, tools=tool_list)
 
             try:
-                response = await self.llm.generate(messages=self.messages, tools=tool_list, enable_deep_think=enable_deep_think)
+                response = await self.llm.generate(messages=self.messages, tools=tool_list)
             except Exception as e:
+                # Check if it's a retry exhausted error
                 from .retry import RetryExhaustedError
 
                 if isinstance(e, RetryExhaustedError):
@@ -307,9 +427,11 @@ Requirements:
                     print(f"\n{Colors.BRIGHT_RED}❌ Error:{Colors.RESET} {error_msg}")
                 return error_msg
 
+            # Accumulate API reported token usage
             if response.usage:
                 self.api_total_tokens = response.usage.total_tokens
 
+            # Log LLM response
             self.logger.log_response(
                 content=response.content,
                 thinking=response.thinking,
@@ -317,6 +439,7 @@ Requirements:
                 finish_reason=response.finish_reason,
             )
 
+            # Add assistant message
             assistant_msg = Message(
                 role="assistant",
                 content=response.content,
@@ -325,26 +448,42 @@ Requirements:
             )
             self.messages.append(assistant_msg)
 
+            # Print thinking if present
+            if response.thinking:
+                print(f"\n{Colors.BOLD}{Colors.MAGENTA}🧠 Thinking:{Colors.RESET}")
+                print(f"{Colors.DIM}{response.thinking}{Colors.RESET}")
+
+            # Print assistant response
+            if response.content:
+                print(f"\n{Colors.BOLD}{Colors.BRIGHT_BLUE}🤖 Assistant:{Colors.RESET}")
+                print(f"{response.content}")
+
+            # Check if task is complete (no tool calls)
             if not response.tool_calls:
                 step_elapsed = perf_counter() - step_start_time
                 total_elapsed = perf_counter() - run_start_time
                 print(f"\n{Colors.DIM}⏱️  Step {step + 1} completed in {step_elapsed:.2f}s (total: {total_elapsed:.2f}s){Colors.RESET}")
                 return response.content
 
+            # Check for cancellation before executing tools
             if self._check_cancelled():
                 self._cleanup_incomplete_messages()
                 cancel_msg = "Task cancelled by user."
                 print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {cancel_msg}{Colors.RESET}")
                 return cancel_msg
 
+            # Execute tool calls
             for tool_call in response.tool_calls:
                 tool_call_id = tool_call.id
                 function_name = tool_call.function.name
                 arguments = tool_call.function.arguments
 
+                # Tool call header
                 print(f"\n{Colors.BRIGHT_YELLOW}🔧 Tool Call:{Colors.RESET} {Colors.BOLD}{Colors.CYAN}{function_name}{Colors.RESET}")
 
+                # Arguments (formatted display)
                 print(f"{Colors.DIM}   Arguments:{Colors.RESET}")
+                # Truncate each argument value to avoid overly long output
                 truncated_args = {}
                 for key, value in arguments.items():
                     value_str = str(value)
@@ -356,6 +495,7 @@ Requirements:
                 for line in args_json.split("\n"):
                     print(f"   {Colors.DIM}{line}{Colors.RESET}")
 
+                # Execute tool
                 if function_name not in self.tools:
                     result = ToolResult(
                         success=False,
@@ -367,6 +507,7 @@ Requirements:
                         tool = self.tools[function_name]
                         result = await tool.execute(**arguments)
                     except Exception as e:
+                        # Catch all exceptions during tool execution, convert to failed ToolResult
                         import traceback
 
                         error_detail = f"{type(e).__name__}: {str(e)}"
@@ -377,6 +518,7 @@ Requirements:
                             error=f"Tool execution failed: {error_detail}\n\nTraceback:\n{error_trace}",
                         )
 
+                # Log tool execution result
                 self.logger.log_tool_result(
                     tool_name=function_name,
                     arguments=arguments,
@@ -385,6 +527,7 @@ Requirements:
                     result_error=result.error if not result.success else None,
                 )
 
+                # Print result
                 if result.success:
                     result_text = result.content
                     if len(result_text) > 300:
@@ -393,6 +536,7 @@ Requirements:
                 else:
                     print(f"{Colors.BRIGHT_RED}✗ Error:{Colors.RESET} {Colors.RED}{result.error}{Colors.RESET}")
 
+                # Add tool result message
                 tool_msg = Message(
                     role="tool",
                     content=result.content if result.success else f"Error: {result.error}",
@@ -401,6 +545,7 @@ Requirements:
                 )
                 self.messages.append(tool_msg)
 
+                # Check for cancellation after each tool execution
                 if self._check_cancelled():
                     self._cleanup_incomplete_messages()
                     cancel_msg = "Task cancelled by user."
@@ -413,9 +558,11 @@ Requirements:
 
             step += 1
 
+        # Max steps reached
         error_msg = f"Task couldn't be completed after {self.max_steps} steps."
         print(f"\n{Colors.BRIGHT_YELLOW}⚠️  {error_msg}{Colors.RESET}")
         return error_msg
+
 
     async def run_stream(
         self,
@@ -432,13 +579,12 @@ Requirements:
         if cancel_event is not None:
             self.cancel_event = cancel_event
 
-        self.logger.start_new_run()
-        
+        self.run_logger = logging.getLogger("mini_agent.agent")
+
         if enable_deep_think:
             print(f"{Colors.BRIGHT_MAGENTA}🔮 Deep Think Mode Enabled{Colors.RESET}")
-            print(f"{Colors.DIM}📝 Log file: {self.logger.get_log_file_path()}{Colors.RESET}")
         else:
-            print(f"{Colors.DIM}📝 Log file: {self.logger.get_log_file_path()}{Colors.RESET}")
+            print(f"{Colors.DIM}📝 Using main application log{Colors.RESET}")
 
         self.add_user_message(user_message)
 
@@ -464,13 +610,13 @@ Requirements:
             print(f"{Colors.DIM}│{Colors.RESET} {step_text}{' ' * padding}{Colors.DIM}│{Colors.RESET}")
             print(f"{Colors.DIM}╰{'─' * BOX_WIDTH}╯{Colors.RESET}")
 
-            tool_list = list(self.tools.values())
-            
-            self.logger.log_request(messages=self.messages, tools=tool_list)
+            logger.info(f"[{sid}] 💭 Step {step + 1}/{self.max_steps} 开始")
 
-            full_content = ""
+            tool_list = list(self.tools.values())
+
+            self._log_llm_request(self.messages, tool_list)
+
             thinking_content = None
-            thinking_started = False
             assistant_started = False
             full_response = ""
             thinking_content = ""
@@ -565,7 +711,7 @@ Requirements:
                                 ),
                             ))
 
-                self.logger.log_response(
+                self._log_llm_response(
                     content=full_response,
                     thinking=thinking_content or None,
                     tool_calls=tool_calls_for_msg,
@@ -661,12 +807,12 @@ Requirements:
                                 error=f"Tool execution failed: {error_detail}\n\nTraceback:\n{error_trace}",
                             )
 
-                    self.logger.log_tool_result(
+                    self._log_tool_result(
                         tool_name=function_name,
                         arguments=arguments,
-                        result_success=result.success,
-                        result_content=result.content if result.success else None,
-                        result_error=result.error if not result.success else None,
+                        success=result.success,
+                        content=result.content if result.success else None,
+                        error=result.error if not result.success else None,
                     )
 
                     yield {

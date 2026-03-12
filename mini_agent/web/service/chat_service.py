@@ -1,12 +1,12 @@
 """聊天服务模块."""
 
 import asyncio
+from datetime import datetime
 import json
 import logging
 import time
+from typing import AsyncGenerator, Optional, TYPE_CHECKING
 import uuid
-from datetime import datetime
-from typing import TYPE_CHECKING, AsyncGenerator, Optional
 
 from mini_agent.agent import Agent
 from mini_agent.web.database import Database, SessionModel
@@ -96,7 +96,7 @@ def get_llm_client():
     return _cached_llm_client
 
 
-def get_tools(session_id: str = None, username: str = None):
+async def get_tools(session_id: str = None, username: str = None):
     """获取工具列表，包括基础工具和Skills（带缓存）.
     
     Args:
@@ -110,15 +110,18 @@ def get_tools(session_id: str = None, username: str = None):
     # 如果传入了session_id和username，则创建会话隔离的工具
     if session_id and username:
         workspace_dir = get_workspace_dir(session_id, username)
-        return create_tools_with_workspace(workspace_dir)
+        return await create_tools_with_workspace(workspace_dir)
     
     if _cached_tools is not None:
         return _cached_tools, _cached_skill_loader
     
-    return _get_tools_internal()
+    tools, skill_loader = await _get_tools_internal()
+    _cached_tools = tools
+    _cached_skill_loader = skill_loader
+    return tools, skill_loader
 
 
-def _get_tools_internal():
+async def _get_tools_internal():
     """内部函数：获取工具列表（不缓存）."""
     from pathlib import Path
     from mini_agent.tools import (
@@ -131,8 +134,13 @@ def _get_tools_internal():
     from mini_agent.cli import initialize_base_tools, add_workspace_tools
     
     app_config = get_app_config()
-    project_root = Path(__file__).parent.parent.parent
-    workspace_dir = project_root / "workspace"
+    
+    env_workspace = Config.get_workspace_dir()
+    if env_workspace:
+        workspace_dir = Path(env_workspace)
+    else:
+        project_root = Path(__file__).parent.parent.parent
+        workspace_dir = project_root / "workspace"
     
     tools = []
     skill_loader = None
@@ -144,11 +152,8 @@ def _get_tools_internal():
             loop = None
         
         if loop is not None:
-            import concurrent.futures
-            def run_async():
-                return asyncio.run(initialize_base_tools(app_config))
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                tools, skill_loader = executor.submit(run_async).result()
+            # 在当前事件循环中执行异步操作
+            tools, skill_loader = await initialize_base_tools(app_config)
         else:
             tools, skill_loader = asyncio.run(
                 initialize_base_tools(app_config)
@@ -172,7 +177,7 @@ def _get_tools_internal():
     return tools, skill_loader
 
 
-def create_tools_with_workspace(workspace_dir: str):
+async def create_tools_with_workspace(workspace_dir: str):
     """为指定工作目录创建工具实例.
     
     Args:
@@ -205,11 +210,8 @@ def create_tools_with_workspace(workspace_dir: str):
             loop = None
         
         if loop is not None:
-            import concurrent.futures
-            def run_async():
-                return asyncio.run(initialize_base_tools(app_config))
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                tools, skill_loader = executor.submit(run_async).result()
+            # 在当前事件循环中执行异步操作
+            tools, skill_loader = await initialize_base_tools(app_config)
         else:
             tools, skill_loader = asyncio.run(
                 initialize_base_tools(app_config)
@@ -270,8 +272,14 @@ def get_workspace_dir(session_id: str, username: str = None):
         username: 用户名，如果提供则返回 username/session_id 隔离的目录
     """
     from pathlib import Path
-    project_root = Path(__file__).parent.parent.parent
-    workspace = project_root / "workspace"
+    from mini_agent.config import Config
+    
+    env_workspace = Config.get_workspace_dir()
+    if env_workspace:
+        workspace = Path(env_workspace)
+    else:
+        project_root = Path(__file__).parent.parent.parent
+        workspace = project_root / "workspace"
     
     if username:
         safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
@@ -319,7 +327,7 @@ def get_or_create_agent(
     return agent
 
 
-def get_or_create_agent_for_session(session_id: str, http_request=None) -> Agent:
+async def get_or_create_agent_for_session(session_id: str, http_request=None) -> Agent:
     """获取或创建会话的Agent实例."""
     agent = get_session_agent(session_id)
     
@@ -332,7 +340,7 @@ def get_or_create_agent_for_session(session_id: str, http_request=None) -> Agent
             username = user.username
         
         logger.info(f"为会话 {session_id} 创建工具，username={username}")
-        tools, skill_loader = get_tools(session_id, username)
+        tools, skill_loader = await get_tools(session_id, username)
         
         workspace_dir = get_workspace_dir(session_id, username)
         from pathlib import Path
@@ -344,12 +352,12 @@ def get_or_create_agent_for_session(session_id: str, http_request=None) -> Agent
     return agent
 
 
-def create_tools_for_workspace(workspace_dir: str) -> list:
+async def create_tools_for_workspace(workspace_dir: str) -> list:
     """为指定的工作目录创建工具实例.
     
     内部调用 get_tools() 并返回工具列表.
     """
-    tools, _ = get_tools()
+    tools, _ = await get_tools()
     return tools
 
 
@@ -447,7 +455,7 @@ async def chat_stream_generator(
         yield f"data: {json.dumps(start_event, ensure_ascii=False)}\n\n"
         
         event_count = 0
-        step_start_time = time.time()
+        # 已移除未使用的 step_start_time 变量
         
         async for event in agent.run_stream(message_content, enable_deep_think=request.enable_deep_think):
             event_count += 1
@@ -676,7 +684,7 @@ async def chat_non_stream(
     }
     db.add_message(session_id, user_message)
     
-    agent = get_or_create_agent_for_session(session_id)
+    agent = await get_or_create_agent_for_session(session_id)
     
     tool_list = list(agent.tools.values())
     

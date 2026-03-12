@@ -106,6 +106,7 @@ export async function getFileContent(filePath) {
   } catch {
     return text
   }
+
 }
 
 export function downloadFile(filePath, fileName) {
