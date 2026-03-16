@@ -5,11 +5,12 @@ from datetime import datetime
 import json
 import logging
 import time
+from pathlib import Path
 from typing import AsyncGenerator, Optional, TYPE_CHECKING
 import uuid
 
 from mini_agent.agent import Agent
-from mini_agent.web.database import Database, SessionModel
+from mini_agent.web.database import Database, SessionModel, get_database
 from mini_agent.web.models import ChatRequest, ChatResponse
 
 if TYPE_CHECKING:
@@ -334,8 +335,7 @@ async def get_or_create_agent_for_session(session_id: str, http_request=None) ->
     if agent is None:
         username = None
         if http_request:
-            from mini_agent.web.database import Database
-            db = Database()
+            db = get_database()
             user = db.get_or_create_default_user()
             username = user.username
         
@@ -343,7 +343,6 @@ async def get_or_create_agent_for_session(session_id: str, http_request=None) ->
         tools, skill_loader = await get_tools(session_id, username)
         
         workspace_dir = get_workspace_dir(session_id, username)
-        from pathlib import Path
         Path(workspace_dir).mkdir(parents=True, exist_ok=True)
         
         logger.info(f"工具创建完成，使用工作目录: {workspace_dir}")

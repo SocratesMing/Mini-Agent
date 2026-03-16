@@ -30,6 +30,14 @@
         </svg>
         <span>资产</span>
       </button>
+      
+      <button @click="$emit('showTasks')" class="action-btn tasks">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
+        <span>定时任务</span>
+      </button>
     </div>
 
     <div class="divider"></div>
@@ -153,7 +161,7 @@
 import { ref, nextTick, onMounted, onUnmounted } from 'vue'
 import CqLogo from './CqLogo.vue'
 
-const emit = defineEmits(['createSession', 'selectSession', 'deleteSession', 'renameSession', 'toggleSidebar', 'showAssets', 'showProfile'])
+const emit = defineEmits(['createSession', 'selectSession', 'deleteSession', 'renameSession', 'toggleSidebar', 'showAssets', 'showTasks', 'showProfile'])
 
 const props = defineProps({
   sessions: {

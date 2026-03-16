@@ -68,12 +68,47 @@ class ToolsConfig(BaseModel):
     mcp: MCPConfig = Field(default_factory=MCPConfig)
 
 
+class DatabasePoolConfig(BaseModel):
+    """Database connection pool configuration"""
+    pool_size: int = 5
+    max_overflow: int = 10
+    pool_timeout: int = 30
+    pool_recycle: int = 3600
+
+
+class MySQLConfig(BaseModel):
+    """MySQL database configuration"""
+    host: str = "localhost"
+    port: int = 3306
+    user: str = "root"
+    password: str = "your_password"
+    database: str = "mini_agent"
+    charset: str = "utf8mb4"
+    pool: DatabasePoolConfig = Field(default_factory=DatabasePoolConfig)
+    connect_timeout: int = 10
+    read_timeout: int = 30
+    write_timeout: int = 30
+
+
+class SQLiteConfig(BaseModel):
+    """SQLite database configuration"""
+    path: str = "./data/mini_agent.db"
+
+
+class DatabaseConfig(BaseModel):
+    """Database configuration"""
+    type: str = "sqlite"  # "sqlite" or "mysql"
+    sqlite: SQLiteConfig = Field(default_factory=SQLiteConfig)
+    mysql: MySQLConfig = Field(default_factory=MySQLConfig)
+
+
 class Config(BaseModel):
     """Main configuration class"""
 
     llm: LLMConfig
     agent: AgentConfig
     tools: ToolsConfig
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
 
     @classmethod
     def load(cls) -> "Config":
@@ -162,10 +197,50 @@ class Config(BaseModel):
             mcp=mcp_config,
         )
 
+        # Parse database configuration
+        db_data = data.get("database", {})
+        db_type = db_data.get("type", "sqlite")
+        
+        if db_type == "mysql":
+            mysql_data = db_data.get("mysql", {})
+            pool_data = mysql_data.get("pool", {})
+            pool_config = DatabasePoolConfig(
+                pool_size=pool_data.get("pool_size", 5),
+                max_overflow=pool_data.get("max_overflow", 10),
+                pool_timeout=pool_data.get("pool_timeout", 30),
+                pool_recycle=pool_data.get("pool_recycle", 3600),
+            )
+            mysql_config = MySQLConfig(
+                host=mysql_data.get("host", "localhost"),
+                port=mysql_data.get("port", 3306),
+                user=mysql_data.get("user", "root"),
+                password=mysql_data.get("password", ""),
+                database=mysql_data.get("database", "mini_agent"),
+                charset=mysql_data.get("charset", "utf8mb4"),
+                pool=pool_config,
+                connect_timeout=mysql_data.get("connect_timeout", 10),
+                read_timeout=mysql_data.get("read_timeout", 30),
+                write_timeout=mysql_data.get("write_timeout", 30),
+            )
+            sqlite_config = SQLiteConfig()
+        else:
+            sqlite_data = db_data.get("sqlite", {})
+            sqlite_config = SQLiteConfig(
+                path=sqlite_data.get("path", "./data/mini_agent.db"),
+            )
+            mysql_config = MySQLConfig()
+        
+        database_config = DatabaseConfig(
+            type=db_type,
+            sqlite=sqlite_config,
+            mysql=mysql_config,
+        )
+
         return cls(
             llm=llm_config,
             agent=agent_config,
             tools=tools_config,
+            database=database_config,
         )
 
     @staticmethod

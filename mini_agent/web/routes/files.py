@@ -6,6 +6,10 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from mini_agent.config import Config
+from mini_agent.web.database import get_database
+
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/files", tags=["files"])
@@ -91,15 +95,8 @@ async def get_file_binary(file_path: str = Query(..., description="文件路径"
 @router.get("/session/{session_id}")
 async def get_session_generated_files(session_id: str, username: str = None):
     """获取会话生成的文件列表（从workspace目录读取）."""
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    from pathlib import Path
-    from mini_agent.config import Config
-    
     if username is None:
-        from mini_agent.web.database import Database
-        db = Database()
+        db = get_database()
         user = db.get_or_create_default_user()
         username = user.username
     

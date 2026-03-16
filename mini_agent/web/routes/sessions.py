@@ -5,12 +5,16 @@
 
 import logging
 import os
+import shutil
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 
+from mini_agent.config import Config
 from mini_agent.web.database import Database, SessionModel, get_database
 from mini_agent.web.models import (
     CreateSessionRequest,
@@ -41,8 +45,6 @@ async def create_session(
     db: Annotated[Database, Depends(get_database)],
 ):
     """创建新会话并存储到 SQLite 数据库."""
-    import uuid
-    
     session_id = str(uuid.uuid4())
     title = request.title if request.title else "未命名会话"
     now = datetime.now().isoformat()
@@ -240,8 +242,6 @@ async def delete_session(
     
     db.delete_session(session_id)
     
-    from mini_agent.config import Config
-    
     env_workspace = Config.get_workspace_dir()
     if env_workspace:
         workspace = Path(env_workspace)
@@ -249,8 +249,7 @@ async def delete_session(
         project_root = Path(__file__).parent.parent.parent
         workspace = project_root / "workspace"
     
-    from mini_agent.web.database import Database
-    db_for_user = Database()
+    db_for_user = get_database()
     user = db_for_user.get_or_create_default_user()
     username = user.username
     safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
@@ -258,7 +257,6 @@ async def delete_session(
     
     if session_workspace.exists() and session_workspace.is_dir():
         try:
-            import shutil
             shutil.rmtree(session_workspace)
             logger.info(f"删除会话工作目录 | 会话: {session_id} | 路径: {session_workspace}")
         except Exception as e:
@@ -312,8 +310,6 @@ async def upload_file(
     file: UploadFile = File(...),
 ):
     """上传文件到会话目录，返回文件路径供 AI 读取."""
-    import shutil
-    
     session = db.get_session(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="会话不存在")
@@ -322,8 +318,6 @@ async def upload_file(
     username = user.username
     
     safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
-    
-    from mini_agent.config import Config
     
     env_workspace = Config.get_workspace_dir()
     if env_workspace:

@@ -18,6 +18,7 @@
         @renameSession="handleRenameSession"
         @toggleSidebar="toggleSidebar"
         @showAssets="handleShowAssets"
+        @showTasks="handleShowTasks"
         @showProfile="handleShowProfile"
       />
       
@@ -35,13 +36,15 @@
       
       <AssetsPanel v-if="showAssets" :visible="showAssets" @close="showAssets = false" />
       
+      <TasksPanel v-if="showTasks" :visible="showTasks" @close="showTasks = false" />
+      
       <UserProfile 
         v-if="showUserProfile" 
         @close="showUserProfile = false"
       />
       
       <Chat
-        v-else-if="!showAssets && !showUserProfile"
+        v-else-if="!showAssets && !showTasks && !showUserProfile"
         :messages="messages"
         :currentSessionId="currentSessionId"
         :hasFiles="currentSessionHasFiles"
@@ -77,6 +80,7 @@ import { ref, onMounted } from 'vue'
 import SessionList from './components/SessionList.vue'
 import Chat from './components/Chat.vue'
 import AssetsPanel from './components/AssetsPanel.vue'
+import TasksPanel from './components/TasksPanel.vue'
 import UserProfile from './components/UserProfile.vue'
 import Welcome from './components/Welcome.vue'
 import { createSession, listSessions, getChatHistory, deleteSession, sendMessage, renameSession } from './api/chat.js'
@@ -90,6 +94,7 @@ const isStreaming = ref(false)
 const error = ref(null)
 const isSidebarCollapsed = ref(false)
 const showAssets = ref(false)
+const showTasks = ref(false)
 const showUserProfile = ref(false)
 const showWelcome = ref(false)
 const scrollTrigger = ref(0)
@@ -107,9 +112,14 @@ function handleShowAssets() {
   showAssets.value = !showAssets.value
 }
 
+function handleShowTasks() {
+  showTasks.value = !showTasks.value
+}
+
 function handleShowProfile() {
   showUserProfile.value = true
   showAssets.value = false
+  showTasks.value = false
 }
 
 async function handleWelcomeCompleted(profile) {
@@ -126,6 +136,8 @@ function goBack() {
     showUserProfile.value = false
   } else if (showAssets.value) {
     showAssets.value = false
+  } else if (showTasks.value) {
+    showTasks.value = false
   }
 }
 
@@ -175,6 +187,7 @@ async function ensureCurrentSession(initialTitle = '') {
 
 async function handleCreateSession() {
   showAssets.value = false
+  showTasks.value = false
   currentSessionId.value = null
   messages.value = []
   currentSessionHasFiles.value = false
@@ -182,6 +195,7 @@ async function handleCreateSession() {
 
 async function handleSelectSession(sessionId) {
   showAssets.value = false
+  showTasks.value = false
   currentSessionId.value = sessionId
   
   try {

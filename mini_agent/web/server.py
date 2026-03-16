@@ -21,6 +21,7 @@ from mini_agent.web.database import Database, init_database as init_db
 from mini_agent.web.routes.chat import router as chat_router
 from mini_agent.web.routes.files import router as files_router
 from mini_agent.web.routes.sessions import router as sessions_router
+from mini_agent.web.routes.tasks import router as tasks_router
 from mini_agent.web.routes.user import router as user_router
 
 
@@ -197,6 +198,7 @@ app.include_router(sessions_router)
 app.include_router(chat_router)
 app.include_router(user_router)
 app.include_router(files_router)
+app.include_router(tasks_router)
 
 
 @app.get("/", tags=["System"])
