@@ -1,0 +1,63 @@
+# Mini-Agent 配置文件示例
+# 复制此文件为 config.yaml 并根据需要修改配置
+
+llm:
+  provider: "anthropic"  # 或 "openai"
+  api_key: "your-api-key"
+  api_base: "https://api.anthropic.com"
+  model: "claude-sonnet-4-20250514"
+  max_tokens: 8192
+  temperature: 0.7
+  retry_count: 3
+  retry_delay: 1.0
+  timeout: 120.0
+  sse_read_timeout: 120.0
+
+agent:
+  max_iterations: 20
+  enable_memory: true
+  memory_file: ".agent_memory.json"
+
+tools:
+  enable_file_tools: true
+  enable_bash: true
+  enable_note: true
+  enable_skills: true
+  skills_dir: "./skills"
+  mcp_config_path: "mcp.json"
+
+# 向量数据库配置 - 用于知识库检索
+vector_store:
+  enabled: true  # 启用知识库检索
+  db_path: "./data/chroma_db"  # 向量数据库路径
+  collection_name: "mini_agent_docs"  # 集合名称
+  embedding_provider: "ollama"  # 或 "zhipu"
+  ollama_model: "nomic-embed-text"  # Ollama Embedding 模型
+  embedding_dimension: 768  # Embedding 维度
+  batch_size: 100  # 批量处理大小
+  ollama_base_url: "http://localhost:11434"  # Ollama 服务地址
+  zhipu_api_key: ""  # 智谱 API Key（如使用智谱）
+  zhipu_model: "embedding-3"  # 智谱 Embedding 模型
+  
+  # ============ 知识库检索精准度配置 ============
+  # 初始检索数量：从数据库中检索的文档数量（建议设为期望返回数量的 2-3 倍）
+  search_top_k: 10
+  
+  # 相似度阈值：0-1 之间，越大越精准
+  # 推荐配置：
+  #   - 0.3-0.5: 宽松，返回较多文档，适合需要广泛上下文的场景
+  #   - 0.5-0.7: 中等，平衡召回率和精准度（默认）
+  #   - 0.7-0.9: 严格，只返回高度相关的文档，适合精准问答
+  #   - 0.9+: 极严格，可能返回很少或没有文档
+  similarity_threshold: 0.5
+
+database:
+  type: "sqlite"  # 或 "mysql"
+  sqlite:
+    db_path: "./data/agent.db"
+  mysql:
+    host: "localhost"
+    port: 3306
+    database: "mini_agent"
+    user: "root"
+    password: "your-password"

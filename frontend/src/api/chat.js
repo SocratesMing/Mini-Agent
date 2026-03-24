@@ -47,19 +47,20 @@ export async function getChatHistory(sessionId) {
   return { messages: data.messages || [] }
 }
 
-export async function sendMessage(sessionId, message, onChunk, signal, enableDeepThink = true, files = []) {
+export async function sendMessage(sessionId, message, onChunk, signal, enableDeepThink = true, files = [], useKnowledgeBase = false) {
   const controller = new AbortController()
   const abortSignal = signal || controller.signal
 
   const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ 
-      session_id: sessionId, 
-      message, 
+    body: JSON.stringify({
+      session_id: sessionId,
+      message,
       message_id: generateMessageId(),
       enable_deep_think: enableDeepThink,
-      files: files
+      files: files,
+      use_knowledge_base: useKnowledgeBase
     }),
     signal: abortSignal
   })

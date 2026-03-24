@@ -3,6 +3,7 @@
 提供会话的创建、查询、更新、删除等 REST API 接口.
 """
 
+import asyncio
 import logging
 import os
 import shutil
@@ -12,7 +13,7 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from mini_agent.config import Config
 from mini_agent.web.database import Database, SessionModel, get_database
@@ -24,6 +25,7 @@ from mini_agent.web.models import (
     SessionInfo,
     UpdateTitleRequest,
 )
+from mini_agent.web.utils.vector_store import get_vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,93 @@ router = APIRouter(
     prefix="/api/sessions",
     tags=["Session Management"],
 )
+
+
+@router.get(
+    "/files/{filename}/preview",
+    summary="预览文件",
+    description="预览支持的文件类型（图片、PDF、文本等）"
+)
+async def preview_file(filename: str):
+    """预览文件内容"""
+    from urllib.parse import unquote
+    filename = unquote(filename)
+    logger.info(f"[预览] 请求文件: {filename}")
+
+    user_dir = Path("workspace/users")
+    file_path = None
+    try:
+        for user_folder in user_dir.iterdir():
+            if user_folder.is_dir() and (user_folder / "files").is_dir():
+                candidate = user_folder / "files" / filename
+                logger.info(f"[预览] 检查路径: {candidate} (exists={candidate.exists()})")
+                if candidate.exists():
+                    file_path = candidate
+                    logger.info(f"[预览] 找到文件: {file_path}")
+                    break
+        else:
+            logger.warning(f"[预览] 遍历完成，未找到文件: {filename}")
+    except Exception as e:
+        logger.error(f"[预览] 遍历用户目录出错: {e}")
+
+    if not file_path or not file_path.exists():
+        logger.warning(f"[预览] 文件不存在: {filename}")
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    ext = file_path.suffix.lower()
+    logger.info(f"[预览] 文件扩展名: {ext}")
+
+    direct_preview_types = {
+        '.pdf': 'application/pdf',
+        '.png': 'image/png',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif',
+        '.bmp': 'image/bmp',
+        '.webp': 'image/webp',
+        '.svg': 'image/svg+xml',
+        '.ico': 'image/x-icon',
+    }
+
+    if ext in direct_preview_types:
+        file_content = file_path.read_bytes()
+        return Response(
+            content=file_content,
+            media_type=direct_preview_types[ext]
+        )
+
+    text_preview_types = {'.txt', '.json', '.xml', '.csv', '.md'}
+    if ext in text_preview_types:
+        return FileResponse(
+            path=str(file_path),
+            media_type='text/plain',
+            filename=filename
+        )
+
+    binary_types = {'.docx', '.xlsx', '.pptx'}
+    if ext in binary_types:
+        return FileResponse(
+            path=str(file_path),
+            filename=filename
+        )
+
+    parseable_types = {'md', 'html', 'htm', 'doc', 'xls', 'ppt', 'pptx'}
+    if ext.lstrip('.') in parseable_types:
+        from mini_agent.web.utils.file_parser import FileParser
+        logger.info(f"[预览] 开始解析文件: {file_path}, 类型: {ext}")
+        content = FileParser.extract_content(str(file_path), ext)
+        logger.info(f"[预览] 解析结果长度: {len(content) if content else 0}")
+        if content:
+            media_type = 'text/markdown; charset=utf-8' if ext.lstrip('.') == 'md' else 'text/plain; charset=utf-8'
+            return Response(content=content.encode('utf-8'), media_type=media_type)
+        else:
+            logger.warning(f"[预览] 文件解析返回空内容: {file_path}")
+            return Response(content="文件内容为空或解析失败".encode('utf-8'), media_type='text/plain; charset=utf-8')
+
+    raise HTTPException(
+        status_code=415,
+        detail=f"不支持预览此文件类型: {ext}"
+    )
 
 
 @router.post(
@@ -310,53 +399,80 @@ async def upload_file(
     file: UploadFile = File(...),
 ):
     """上传文件到会话目录，返回文件路径供 AI 读取."""
-    session = db.get_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="会话不存在")
-    
     user = db.get_or_create_default_user()
     username = user.username
-    
+
     safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
-    
+
     env_workspace = Config.get_workspace_dir()
     if env_workspace:
         workspace = Path(env_workspace)
     else:
         workspace = Path("workspace")
-    
+
     upload_dir = workspace / "users" / safe_username / "files"
     upload_dir.mkdir(parents=True, exist_ok=True)
-    
+
     filename = file.filename or "unknown"
     file_path = upload_dir / filename
-    
+
     counter = 1
     while file_path.exists():
         name, ext = os.path.splitext(filename)
         file_path = upload_dir / f"{name}_{counter}{ext}"
         counter += 1
-    
+
     with file_path.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    
+
     file_size = file_path.stat().st_size
-    
+
     file_type = os.path.splitext(filename)[1][1:] if '.' in filename else 'unknown'
-    
-    file_id = db.add_session_file(
-        session_id=session_id,
-        filename=file_path.name,
-        file_path=str(file_path),
-        file_type=file_type,
-        size=file_size,
-        username=username
-    )
-    
+
+    session = db.get_session(session_id) if session_id != 'default' else None
+    actual_session_id = session.session_id if session else None
+
+    if actual_session_id:
+        file_id = db.add_session_file(
+            session_id=actual_session_id,
+            filename=file_path.name,
+            file_path=str(file_path),
+            file_type=file_type,
+            size=file_size,
+            username=username
+        )
+    else:
+        logger.info(f"跳过数据库记录 | session_id={session_id} 用于文件: {file_path.name}")
+        file_id = None
+
+    async def background_index_file(file_path_str: str, file_name: str, file_type: str, user: str):
+        """后台异步索引文件到向量数据库"""
+        try:
+            await asyncio.sleep(0.5)
+            vector_store = get_vector_store()
+            if vector_store and vector_store.config.enabled:
+                logger.info(f"[后台索引] 开始索引文件: {file_name} | 用户: {user} | 类型: {file_type}")
+                chunks_count = vector_store.add_file(
+                    file_path=file_path_str,
+                    username=user,
+                    file_type=file_type
+                )
+                if chunks_count > 0:
+                    logger.info(f"[后台索引] ✅ 文件索引完成: {file_name} | chunks: {chunks_count}")
+                else:
+                    logger.warning(f"[后台索引] ⚠️ 文件索引完成但未添加chunks: {file_name}")
+            else:
+                logger.info(f"[后台索引] 向量数据库未启用，跳过文件索引: {file_name}")
+        except Exception as e:
+            logger.error(f"[后台索引] ❌ 文件索引失败: {file_name} | 错误: {e}")
+
+    asyncio.create_task(background_index_file(str(file_path), file_path.name, file_type, username))
+
     logger.info(f"文件上传成功 | 会话: {session_id} | 文件: {file_path.name} | 用户: {username} | ID: {file_id}")
-    
+    logger.info(f"[异步索引] 向量数据库索引任务已创建，将在后台执行")
+
     return {
-        "id": file_id,
+        "id": file_id or file_path.name,
         "filename": file_path.name,
         "file_path": str(file_path),
         "file_type": file_type,
@@ -391,31 +507,98 @@ async def list_session_files(
 )
 async def delete_session_file(
     session_id: str,
-    file_id: int,
+    file_id: str,
     db: Annotated[Database, Depends(get_database)],
 ):
     """删除会话文件并移除文件系统中的文件."""
-    session = db.get_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="会话不存在")
-    
-    files = db.get_session_files(session_id)
-    file_to_delete = next((f for f in files if f['id'] == file_id), None)
-    
-    if not file_to_delete:
-        raise HTTPException(status_code=404, detail="文件不存在")
-    
+    from urllib.parse import unquote
+    file_id = unquote(file_id)
+
+    user = db.get_or_create_default_user()
+    username = user.username
+    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
+
+    if session_id == "files":
+        files = []
+        user_dir = Path("workspace") / "users" / safe_username / "files"
+        if user_dir.exists():
+            for fp in user_dir.iterdir():
+                if fp.is_file() and fp.name == file_id:
+                    file_to_delete = {
+                        "id": fp.name,
+                        "filename": fp.name,
+                        "file_path": str(fp),
+                        "file_type": fp.suffix[1:] if fp.suffix else "unknown",
+                        "size": fp.stat().st_size,
+                        "username": safe_username,
+                    }
+                    files.append(file_to_delete)
+
+        if not files:
+            raise HTTPException(status_code=404, detail="文件不存在")
+        file_to_delete = files[0]
+    else:
+        session = db.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="会话不存在")
+
+        files = db.get_session_files(session_id)
+        file_to_delete = None
+        if file_id.isdigit():
+            file_to_delete = next((f for f in files if f['id'] == int(file_id)), None)
+        else:
+            file_to_delete = next((f for f in files if f['filename'] == file_id), None)
+
+        if not file_to_delete:
+            raise HTTPException(status_code=404, detail="文件不存在")
+
     file_path = file_to_delete['file_path']
-    if os.path.exists(file_path):
+    file_username = file_to_delete.get('username', safe_username)
+    db_id = file_to_delete.get('id')
+
+    async def background_delete(file_path: str, file_username: str, db_id, session_id: str, filename: str):
+        """后台异步删除文件"""
         try:
-            os.remove(file_path)
-            logger.info(f"文件系统删除成功 | 文件: {file_path}")
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                    logger.info(f"[后台删除] 文件系统删除成功 | 文件: {file_path}")
+                except Exception as e:
+                    logger.error(f"[后台删除] 文件系统删除失败 | 文件: {file_path} | 错误: {e}")
+            else:
+                logger.warning(f"[后台删除] 文件不存在 | 文件: {file_path}")
+
+            try:
+                vector_store = get_vector_store()
+                if vector_store and vector_store.config.enabled:
+                    logger.info(f"[后台删除] 开始从向量数据库删除文件: {file_path} | 用户: {file_username}")
+                    deleted_count = vector_store.delete_file(
+                        file_path=file_path,
+                        username=file_username
+                    )
+                    logger.info(f"[后台删除] ✅ 文件从向量数据库删除完成: {file_path} | 删除chunks: {deleted_count}")
+            except Exception as e:
+                logger.error(f"[后台删除] ❌ 从向量数据库删除文件失败: {file_path} | 错误: {e}")
+
+            if db_id and isinstance(db_id, int):
+                try:
+                    if not db.delete_session_file(db_id):
+                        logger.warning(f"[后台删除] 数据库记录删除失败 | 文件ID: {db_id}")
+                    else:
+                        logger.info(f"[后台删除] 数据库记录删除成功 | 会话: {session_id} | 文件ID: {db_id}")
+                except Exception as e:
+                    logger.error(f"[后台删除] 数据库记录删除失败 | 文件ID: {db_id} | 错误: {e}")
+
+            logger.info(f"[后台删除] ✅ 文件删除完成 | 文件: {filename}")
         except Exception as e:
-            logger.error(f"文件系统删除失败 | 文件: {file_path} | 错误: {e}")
-    
-    if not db.delete_session_file(file_id):
-        raise HTTPException(status_code=404, detail="文件不存在")
-    
-    logger.info(f"文件删除成功 | 会话: {session_id} | 文件ID: {file_id}")
-    
-    return {"status": "deleted", "file_id": file_id}
+            logger.error(f"[后台删除] ❌ 文件删除失败 | 文件: {filename} | 错误: {e}")
+
+    asyncio.create_task(background_delete(
+        file_path=file_path,
+        file_username=file_username,
+        db_id=db_id,
+        session_id=session_id,
+        filename=file_to_delete.get('filename', file_id)
+    ))
+
+    return {"status": "deleted", "file_id": file_to_delete.get('filename', file_id)}

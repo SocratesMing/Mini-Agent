@@ -2,13 +2,30 @@
   <div class="assets-panel">
     <div class="assets-header">
       <h2>我的资产</h2>
-      <button @click="refreshAssets" class="refresh-btn" :disabled="loading">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spinning: loading }">
-          <polyline points="23 4 23 10 17 10"></polyline>
-          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
-        </svg>
-        刷新
-      </button>
+      <div class="header-actions">
+        <label class="upload-btn" :class="{ disabled: uploading }">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          上传文件
+          <input
+            type="file"
+            @change="handleUpload"
+            multiple
+            :disabled="uploading"
+            hidden
+          />
+        </label>
+        <button @click="refreshAssets" class="refresh-btn" :disabled="loading || uploading">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spinning: loading }">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+          刷新
+        </button>
+      </div>
     </div>
 
     <div class="tabs">
@@ -44,6 +61,7 @@
           v-for="file in currentFiles"
           :key="file.file_path"
           class="file-card"
+          @dblclick="handlePreview(file)"
         >
           <div class="file-icon" :class="getCategoryClass(file.category)">
             <FileIcon :filename="file.filename" :size="48" />
@@ -56,30 +74,69 @@
             </div>
           </div>
           <div class="file-actions">
-            <button class="file-action" @click="downloadFile(file)" title="下载文件">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-            </button>
-            <button class="file-action" @click="copyPath(file.file_path)" title="复制路径">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-            </button>
+            <div class="dropdown" @mouseleave="closeDropdown">
+              <button class="file-action more-action" @click="toggleDropdown(file.file_path)" title="更多操作">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="5" r="1.5"></circle>
+                  <circle cx="12" cy="12" r="1.5"></circle>
+                  <circle cx="12" cy="19" r="1.5"></circle>
+                </svg>
+              </button>
+              <div v-if="activeDropdown === file.file_path" class="dropdown-menu">
+                <button class="dropdown-item" @click="handleDownload(file)">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                  下载
+                </button>
+                <button class="dropdown-item" @click="handleCopyPath(file.file_path)">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                  复制路径
+                </button>
+                <button class="dropdown-item delete-item" @click="handleDelete(file)">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  </svg>
+                  删除
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </div>
   </div>
+
+  <ConfirmDialog
+    ref="confirmDialog"
+    title="确认删除"
+    message="确定要删除此文件吗？此操作不可恢复。"
+    confirm-text="删除"
+    cancel-text="取消"
+    type="danger"
+  />
+
+  <FilePreview
+    ref="previewDialog"
+    :filename="previewFile.filename"
+    :file-path="previewFile.filePath"
+    :visible="previewFile.visible"
+    @close="previewFile.visible = false"
+  />
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch, onActivated } from 'vue'
-import { getAllFiles } from '../api/files.js'
+import { getAllFiles, deleteFile } from '../api/files.js'
 import FileIcon from './FileIcon.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
+import FilePreview from './FilePreview.vue'
 
 const props = defineProps({
   visible: {
@@ -90,8 +147,21 @@ const props = defineProps({
 
 const loading = ref(false)
 const allFiles = ref([])
+const confirmDialog = ref(null)
 const activeTab = ref('全部')
+const uploading = ref(false)
+const activeDropdown = ref(null)
+const previewDialog = ref(null)
+const previewFile = ref({ filename: '', filePath: '', visible: false })
 const emit = defineEmits(['close'])
+
+function toggleDropdown(filePath) {
+  activeDropdown.value = activeDropdown.value === filePath ? null : filePath
+}
+
+function closeDropdown() {
+  activeDropdown.value = null
+}
 
 const categories = ['全部', '文档', '图片', '代码', '数据', '其他']
 
@@ -175,21 +245,56 @@ async function refreshAssets() {
   }
 }
 
+async function handleUpload(event) {
+  const files = Array.from(event.target.files)
+  if (files.length === 0) return
+
+  uploading.value = true
+
+  for (const file of files) {
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('session_id', 'default')
+
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+      const response = await fetch(`${API_BASE_URL}/api/sessions/default/upload`, {
+        method: 'POST',
+        body: formData
+      })
+
+      if (response.ok) {
+        console.log('文件上传成功:', file.name)
+      } else {
+        console.error('文件上传失败:', file.name)
+      }
+    } catch (e) {
+      console.error('上传文件失败:', e)
+    }
+  }
+
+  uploading.value = false
+  event.target.value = ''
+
+  await refreshAssets()
+}
+
 function formatSize(bytes) {
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
-async function copyPath(path) {
+async function handleCopyPath(path) {
   try {
     await navigator.clipboard.writeText(path)
   } catch (e) {
     console.error('复制失败:', e)
   }
+  closeDropdown()
 }
 
-function downloadFile(file) {
+function handleDownload(file) {
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
   const url = `${API_BASE_URL}/api/sessions/files/${encodeURIComponent(file.filename)}/download`
   const link = document.createElement('a')
@@ -198,6 +303,44 @@ function downloadFile(file) {
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
+  closeDropdown()
+}
+
+async function handleDelete(file) {
+  closeDropdown()
+
+  const confirmed = await confirmDialog.value.show()
+  if (!confirmed) {
+    return
+  }
+
+  try {
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+    const sessionId = file.session_id || 'files'
+    const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/files/${encodeURIComponent(file.id)}`, {
+      method: 'DELETE'
+    })
+
+    if (response.ok) {
+      console.log('文件删除成功:', file.filename)
+      await refreshAssets()
+    } else {
+      const error = await response.json()
+      console.error('文件删除失败:', error)
+      alert('删除失败: ' + (error.detail || '未知错误'))
+    }
+  } catch (e) {
+    console.error('删除文件失败:', e)
+    alert('删除失败: ' + e.message)
+  }
+}
+
+function handlePreview(file) {
+  previewFile.value = {
+    filename: file.filename,
+    filePath: file.file_path,
+    visible: true
+  }
 }
 
 onMounted(() => {
@@ -234,6 +377,40 @@ watch(() => props.visible, (newVal) => {
   font-size: 20px;
   font-weight: 600;
   color: #1e293b;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.upload-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid #3b82f6;
+  background: #3b82f6;
+  border-radius: 8px;
+  font-size: 14px;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.upload-btn:hover:not(.disabled) {
+  background: #2563eb;
+}
+
+.upload-btn.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.upload-btn svg {
+  width: 16px;
+  height: 16px;
 }
 
 .refresh-btn {
@@ -390,6 +567,7 @@ watch(() => props.visible, (newVal) => {
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   transition: all 0.2s;
+  cursor: pointer;
 }
 
 .file-card:hover {
@@ -467,8 +645,11 @@ watch(() => props.visible, (newVal) => {
 }
 
 .file-actions {
-  display: flex;
-  gap: 4px;
+  position: relative;
+}
+
+.dropdown {
+  position: relative;
 }
 
 .file-action {
@@ -481,21 +662,70 @@ watch(() => props.visible, (newVal) => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  opacity: 0;
   transition: all 0.2s;
-}
-
-.file-card:hover .file-action {
-  opacity: 1;
 }
 
 .file-action:hover {
   background: #f1f5f9;
 }
 
+.file-action.more-action {
+  opacity: 1;
+}
+
+.file-action.more-action svg {
+  width: 20px;
+  height: 20px;
+}
+
 .file-action svg {
   width: 16px;
   height: 16px;
   color: #64748b;
+}
+
+.dropdown-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  min-width: 120px;
+  z-index: 100;
+  padding: 4px;
+}
+
+.dropdown-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dropdown-item:hover {
+  background: #f1f5f9;
+}
+
+.dropdown-item.delete-item {
+  color: #ef4444;
+}
+
+.dropdown-item.delete-item:hover {
+  background: #fee2e2;
+}
+
+.dropdown-item svg {
+  width: 16px;
+  height: 16px;
 }
 </style>

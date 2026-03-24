@@ -71,12 +71,13 @@ class MessageModel(BaseModel):
 
 class ChatRequest(BaseModel):
     """聊天请求模型."""
-    
+
     message: str = Field(..., description="用户消息内容", min_length=1)
     session_id: Optional[str] = Field(default=None, description="会话ID，不提供则创建新会话")
     message_id: Optional[str] = Field(default=None, description="消息ID，用于追踪单条消息（可选）")
     enable_deep_think: bool = Field(default=False, description="是否启用深度思考模式")
     files: Optional[List[dict]] = Field(default=None, description="用户上传的文件列表")
+    use_knowledge_base: bool = Field(default=False, description="是否启用知识库检索")
 
 
 class ChatResponse(BaseModel):
@@ -182,28 +183,4 @@ class UpdateUserProfileRequest(BaseModel):
     username: Optional[str] = Field(default=None, description="用户名")
     organization_id: Optional[str] = Field(default=None, description="机构ID")
     email: Optional[str] = Field(default=None, description="用户邮箱")
-
-
-class ScheduledTaskModel(BaseModel):
-    """定时任务模型."""
-    task_id: str = Field(..., description="任务ID")
-    username: str = Field(..., description="用户名")
-    name: str = Field(..., description="任务名称")
-    description: str = Field(default="", description="任务描述")
-    cron_expression: str = Field(..., description="Cron表达式")
-    enabled: bool = Field(default=True, description="是否启用")
-    created_at: str = Field(..., description="创建时间")
-    updated_at: str = Field(..., description="更新时间")
-
-
-class TaskExecutionModel(BaseModel):
-    """任务执行记录模型."""
-    execution_id: str = Field(..., description="执行ID")
-    task_id: str = Field(..., description="任务ID")
-    username: str = Field(..., description="用户名")
-    status: str = Field(..., description="执行状态")
-    result: str = Field(default="", description="执行结果")
-    error_message: str = Field(default="", description="错误信息")
-    started_at: str = Field(..., description="开始时间")
-    completed_at: str = Field(default="", description="完成时间")
 

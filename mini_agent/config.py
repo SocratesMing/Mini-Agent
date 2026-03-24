@@ -50,6 +50,22 @@ class MCPConfig(BaseModel):
     sse_read_timeout: float = 120.0  # SSE read timeout (seconds)
 
 
+class VectorStoreConfig(BaseModel):
+    """Vector store configuration for Chroma with Ollama embedding"""
+    enabled: bool = False
+    db_path: str = "./data/chroma_db"
+    collection_name: str = "mini_agent_docs"
+    embedding_provider: str = "ollama"
+    ollama_model: str = "nomic-embed-text"
+    embedding_dimension: int = 768
+    batch_size: int = 100
+    ollama_base_url: str = "http://localhost:11434"
+    zhipu_api_key: str = ""
+    zhipu_model: str = "embedding-3"
+    search_top_k: int = 10  # 初始检索数量
+    similarity_threshold: float = 0.5  # 相似度阈值 (0-1)，越大越精准
+
+
 class ToolsConfig(BaseModel):
     """Tools configuration"""
 
@@ -109,6 +125,7 @@ class Config(BaseModel):
     agent: AgentConfig
     tools: ToolsConfig
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    vector_store: VectorStoreConfig = Field(default_factory=VectorStoreConfig)
 
     @classmethod
     def load(cls) -> "Config":
@@ -236,11 +253,28 @@ class Config(BaseModel):
             mysql=mysql_config,
         )
 
+        vector_store_data = data.get("vector_store", {})
+        vector_store_config = VectorStoreConfig(
+            enabled=vector_store_data.get("enabled", False),
+            db_path=vector_store_data.get("db_path", "./data/chroma_db"),
+            collection_name=vector_store_data.get("collection_name", "mini_agent_docs"),
+            embedding_provider=vector_store_data.get("embedding_provider", "ollama"),
+            ollama_model=vector_store_data.get("ollama_model", "nomic-embed-text"),
+            embedding_dimension=vector_store_data.get("embedding_dimension", 768),
+            batch_size=vector_store_data.get("batch_size", 100),
+            ollama_base_url=vector_store_data.get("ollama_base_url", "http://localhost:11434"),
+            zhipu_api_key=vector_store_data.get("zhipu_api_key", ""),
+            zhipu_model=vector_store_data.get("zhipu_model", "embedding-3"),
+            search_top_k=vector_store_data.get("search_top_k", 10),
+            similarity_threshold=vector_store_data.get("similarity_threshold", 0.5),
+        )
+
         return cls(
             llm=llm_config,
             agent=agent_config,
             tools=tools_config,
             database=database_config,
+            vector_store=vector_store_config,
         )
 
     @staticmethod

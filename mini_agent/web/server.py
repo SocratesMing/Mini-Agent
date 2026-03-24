@@ -21,8 +21,8 @@ from mini_agent.web.database import Database, init_database as init_db
 from mini_agent.web.routes.chat import router as chat_router
 from mini_agent.web.routes.files import router as files_router
 from mini_agent.web.routes.sessions import router as sessions_router
-from mini_agent.web.routes.tasks import router as tasks_router
 from mini_agent.web.routes.user import router as user_router
+from mini_agent.web.routes.vector_admin import router as vector_admin_router
 
 
 agent_config = None
@@ -166,7 +166,17 @@ async def lifespan(app: FastAPI):
     
     db_instance = init_db()
     logger.info("数据库初始化完成")
-    
+
+    try:
+        from mini_agent.web.utils.vector_store import get_vector_store
+        vector_store = get_vector_store()
+        if vector_store and vector_store.config.enabled:
+            logger.info(f"[启动] 向量数据库已启用 | provider: {vector_store.config.embedding_provider}")
+        else:
+            logger.info("[启动] 向量数据库未启用")
+    except Exception as e:
+        logger.warning(f"[启动] 向量数据库初始化失败: {e}")
+
     yield
     
     if db_instance:
@@ -198,7 +208,7 @@ app.include_router(sessions_router)
 app.include_router(chat_router)
 app.include_router(user_router)
 app.include_router(files_router)
-app.include_router(tasks_router)
+app.include_router(vector_admin_router)
 
 
 @app.get("/", tags=["System"])

@@ -50,7 +50,7 @@ async def chat_stream(
     
     sid = session_id[-5:] if session_id else "new"
     
-    logger.info(f"[{sid}] 聊天请求 | message: {request.message[:50]}{'...' if len(request.message) > 50 else ''} | deep_think: {request.enable_deep_think}")
+    logger.info(f"[{sid}] 聊天请求 | message: {request.message[:50]}{'...' if len(request.message) > 50 else ''} | deep_think: {request.enable_deep_think} | use_knowledge_base: {request.use_knowledge_base}")
     
     def generate_session_title(message, files):
         if message and message.strip():

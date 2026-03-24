@@ -4,9 +4,11 @@ DeepSeek/OpenAI 流式输出测试脚本
 1. 流式输出思考内容（reasoning_content）
 2. 流式输出最终回答内容
 3. 识别并处理工具调用
+4. 异步响应时间统计
 """
 
 import json
+import time
 from openai import OpenAI
 
 
@@ -79,6 +81,19 @@ class StreamProcessor:
         self.thinking_content = ""
         self.final_content = ""
         self.mode = None  # 'thinking' | 'content' | None
+        self.start_time = None
+        self.end_time = None
+        self.token_counts = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        }
+        self.time_stats = {
+            "request_time": 0,
+            "first_token_time": 0,
+            "thinking_time": 0,
+            "content_time": 0,
+        }
 
     def _print_chunk(self, prefix: str, content: str):
         """打印增量内容（不换行）"""
@@ -97,11 +112,17 @@ class StreamProcessor:
         has_content = False
         has_tools = False
 
+        # 记录首个 token 时间
+        if self.start_time and not self.time_stats["first_token_time"]:
+            self.time_stats["first_token_time"] = time.time() - self.start_time
+
         # 1. 处理思考内容
         if hasattr(delta, "reasoning_content") and delta.reasoning_content:
             has_thinking = True
+            thinking_start = time.time()
             self._print_chunk("思考", delta.reasoning_content)
             self.thinking_content += delta.reasoning_content
+            self.time_stats["thinking_time"] += time.time() - thinking_start
 
         # 2. 处理工具调用
         if hasattr(delta, "tool_calls") and delta.tool_calls:
@@ -124,8 +145,10 @@ class StreamProcessor:
         # 3. 处理正式内容
         if hasattr(delta, "content") and delta.content:
             has_content = True
+            content_start = time.time()
             self._print_chunk("回答", delta.content)
             self.final_content += delta.content
+            self.time_stats["content_time"] += time.time() - content_start
 
         return has_thinking, has_content, has_tools
 
@@ -200,6 +223,13 @@ class StreamProcessor:
         self.thinking_content = ""
         self.final_content = ""
         self.mode = None
+        self.start_time = time.time()
+        self.time_stats = {
+            "request_time": 0,
+            "first_token_time": 0,
+            "thinking_time": 0,
+            "content_time": 0,
+        }
 
         # 发送请求
         response = self.client.chat.completions.create(
@@ -278,10 +308,20 @@ class StreamProcessor:
             if self.mode is not None:
                 print()
 
+        self.end_time = time.time()
+        self.time_stats["request_time"] = self.end_time - self.start_time
+
         # 输出总结
         print("\n" + "=" * 50)
         print("[处理完成]")
         print("=" * 50)
+
+        # 输出时间统计
+        print("\n[时间统计]")
+        print(f"  总耗时: {self.time_stats['request_time']:.3f} 秒")
+        print(f"  首个 token 耗时: {self.time_stats['first_token_time']:.3f} 秒")
+        print(f"  思考内容耗时: {self.time_stats['thinking_time']:.3f} 秒")
+        print(f"  回答内容耗时: {self.time_stats['content_time']:.3f} 秒")
 
         if self.thinking_content:
             print(f"\n[思考内容] ({len(self.thinking_content)} 字符)")

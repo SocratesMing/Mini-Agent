@@ -378,8 +378,8 @@ function goToNextUserMessage() {
   }
 }
 
-function handleSend(message, files, signal) {
-  emit('sendMessage', message, files, signal)
+function handleSend(message, files, signal, enableDeepThink = true, enableKnowledgeBase = false) {
+  emit('sendMessage', message, files, signal, enableDeepThink, enableKnowledgeBase)
 }
 
 function handleRemoveFile(file, messageIndex) {

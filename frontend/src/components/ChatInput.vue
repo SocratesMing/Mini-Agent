@@ -65,7 +65,7 @@
           <span class="divider">|</span>
           
           <button 
-            class="deep-think-btn" 
+            class="deep-think-btn"
             :class="{ active: enableDeepThink, disabled: isStreaming || disabled }"
             :disabled="isStreaming || disabled"
             @click="enableDeepThink = !enableDeepThink"
@@ -76,6 +76,20 @@
               <path fill-rule="evenodd" d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" clip-rule="evenodd"></path>
             </svg>
             <span class="deep-think-label">深度思考</span>
+          </button>
+
+          <button
+            class="knowledge-base-btn"
+            :class="{ active: enableKnowledgeBase, disabled: isStreaming || disabled }"
+            :disabled="isStreaming || disabled"
+            @click="enableKnowledgeBase = !enableKnowledgeBase"
+            title="知识库检索"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+            </svg>
+            <span class="knowledge-base-label">知识库</span>
           </button>
         </div>
         
@@ -139,6 +153,7 @@ const message = ref('')
 const textareaRef = ref(null)
 const uploadedFiles = ref([])
 const enableDeepThink = ref(true)
+const enableKnowledgeBase = ref(false)
 let abortController = null
 
 const canSend = computed(() => {
@@ -278,7 +293,7 @@ async function send() {
     type: f.file?.type || f.fileType || ''
   }))
   
-  emit('send', message.value.trim().replace(/\s+/g, ' '), filesToSend, abortController.signal, enableDeepThink.value)
+  emit('send', message.value.trim().replace(/\s+/g, ' '), filesToSend, abortController.signal, enableDeepThink.value, enableKnowledgeBase.value)
   
   message.value = ''
   uploadedFiles.value = []
@@ -566,9 +581,8 @@ onUnmounted(() => {
 }
 
 .deep-think-btn.active {
-  background: #7dd3fc;
-  border-color: #7dd3fc;
-  border-radius: 6px;
+  background: #3b82f6;
+  border-color: #3b82f6;
 }
 
 .deep-think-btn.active svg,
@@ -577,6 +591,52 @@ onUnmounted(() => {
 }
 
 .deep-think-btn.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.knowledge-base-btn {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  height: auto;
+  min-height: 32px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.knowledge-base-btn svg {
+  width: 16px;
+  height: 16px;
+  color: #64748b;
+}
+
+.knowledge-base-btn.active svg {
+  color: white;
+}
+
+.knowledge-base-label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.knowledge-base-btn.active {
+  background: #3b82f6;
+  border-color: #3b82f6;
+}
+
+.knowledge-base-btn.active .knowledge-base-label {
+  color: white;
+}
+
+.knowledge-base-btn.disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }

@@ -453,6 +453,46 @@ async def chat_stream_generator(
         start_event = {'type': 'start', 'session_id': session_id, 'message_id': message_id, 'title': session.title}
         yield f"data: {json.dumps(start_event, ensure_ascii=False)}\n\n"
         
+        if request.use_knowledge_base:
+            yield f"data: {json.dumps({'type': 'thinking_start'}, ensure_ascii=False)}\n\n"
+
+            try:
+                from mini_agent.web.utils.vector_store import get_vector_store
+                vector_store = get_vector_store()
+
+                if vector_store and vector_store.config.enabled:
+                    username = getattr(session, 'username', '') if session else ""
+                    yield f"data: {json.dumps({'type': 'thinking', 'content': '🔍 正在检索知识库...' + chr(10) + chr(10)}, ensure_ascii=False)}\n\n"
+                    
+                    search_results = vector_store.search(
+                        query=message_content,
+                        username=username
+                    )
+                    
+                    if search_results:
+                        yield f"data: {json.dumps({'type': 'thinking', 'content': f'✅ 找到了{len(search_results)}篇文档' + chr(10) + chr(10)}, ensure_ascii=False)}\n\n"
+                        
+                        # 显示文档列表
+                        for i, result in enumerate(search_results, 1):
+                            file_name = result.get('file_name', '未知文件')
+                            yield f"data: {json.dumps({'type': 'thinking', 'content': f'📄 文档{i}: {file_name}' + chr(10) + chr(10)}, ensure_ascii=False)}\n\n"
+
+                        context = vector_store.get_context_for_query(
+                            query=message_content,
+                            username=username
+                        )
+                        if context:
+                            message_content = f"{context}\n\n用户问题：{message_content}"
+                    else:
+                        yield f"data: {json.dumps({'type': 'thinking', 'content': '⚠️ 知识库中未找到相关文档'}, ensure_ascii=False)}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'thinking', 'content': '⚠️ 知识库未启用或向量数据库连接失败'}, ensure_ascii=False)}\n\n"
+
+            except Exception as kb_error:
+                yield f"data: {json.dumps({'type': 'thinking', 'content': f'❌ 知识库检索失败：{str(kb_error)}'}, ensure_ascii=False)}\n\n"
+
+            yield f"data: {json.dumps({'type': 'thinking_end', 'duration': 0}, ensure_ascii=False)}\n\n"
+        
         event_count = 0
         # 已移除未使用的 step_start_time 变量
         
