@@ -14,9 +14,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from mini_agent.web.database import Database, SessionModel, get_database
+from mini_agent.web.dependencies import get_current_username
 from mini_agent.web.models import (
     ChatRequest,
-    ChatResponse,
 )
 from mini_agent.web.service import get_or_create_agent_for_session, chat_stream_generator, remove_session_agent
 
@@ -38,6 +38,7 @@ async def chat_stream(
     request: ChatRequest,
     db: Annotated[Database, Depends(get_database)],
     http_request: Request,
+    username: Annotated[str, Depends(get_current_username)],
 ):
     """发送聊天消息并返回流式响应."""
     start_time = time.time()
@@ -72,6 +73,7 @@ async def chat_stream(
             messages=[],
             created_at=now,
             updated_at=now,
+            username=username,
         )
         db.create_session(session_data)
     else:
@@ -86,6 +88,7 @@ async def chat_stream(
                 messages=[],
                 created_at=now,
                 updated_at=now,
+                username=username,
             )
             db.create_session(session_data)
         elif len(session.messages) == 0:
@@ -125,7 +128,7 @@ async def chat_stream(
         except Exception as e:
             logger.error(f"[{sid}] 文件解析出错: {str(e)}")
     
-    agent = await get_or_create_agent_for_session(session_id, request)
+    agent = await get_or_create_agent_for_session(session_id, username)
     
     return StreamingResponse(
         chat_stream_generator(
@@ -134,6 +137,7 @@ async def chat_stream(
             agent=agent,
             session_id=session_id,
             message_id=message_id,
+            username=username,
             http_request=http_request,
             parsed_content=parsed_content,
         ),

@@ -49,6 +49,7 @@ class SessionModel(BaseModel):
         messages: 消息列表，存储为JSON格式
         created_at: 创建时间
         updated_at: 更新时间
+        username: 所属用户名
     """
     
     session_id: str
@@ -56,6 +57,7 @@ class SessionModel(BaseModel):
     messages: list[dict[str, Any]]
     created_at: str
     updated_at: str
+    username: str = ""
     
     def to_json(self) -> str:
         """转换为JSON字符串."""
@@ -70,18 +72,20 @@ class SessionModel(BaseModel):
 
 class UserModel(BaseModel):
     """用户数据模型.
-    
+
     Attributes:
         user_id: 用户唯一标识符
         username: 用户名
+        password_hash: 密码哈希
         organization_id: 机构ID
         email: 用户邮箱
         created_at: 创建时间
         updated_at: 更新时间
     """
-    
+
     user_id: str
     username: str
+    password_hash: str = ""
     organization_id: str = ""
     email: str = ""
     created_at: str
@@ -246,10 +250,24 @@ class Database:
                     title TEXT NOT NULL,
                     messages TEXT NOT NULL,
                     created_at VARCHAR(50) NOT NULL,
-                    updated_at VARCHAR(50) NOT NULL
+                    updated_at VARCHAR(50) NOT NULL,
+                    username VARCHAR(255) DEFAULT ''
                 )
             """)
             self._create_index(cursor, "idx_updated_at", "sessions", "updated_at")
+            
+            if self.db_type == "sqlite":
+                cursor.execute("PRAGMA table_info(sessions)")
+                columns = [col[1] for col in cursor.fetchall()]
+                if 'username' not in columns:
+                    cursor.execute("ALTER TABLE sessions ADD COLUMN username VARCHAR(255) DEFAULT ''")
+            else:
+                cursor.execute("SHOW COLUMNS FROM sessions")
+                columns = [col['Field'] if isinstance(col, dict) else col[0] for col in cursor.fetchall()]
+                if 'username' not in columns:
+                    cursor.execute("ALTER TABLE sessions ADD COLUMN username VARCHAR(255) DEFAULT ''")
+            
+            self._create_index(cursor, "idx_sessions_username", "sessions", "username")
             
             cursor.execute(f"""
                 CREATE TABLE IF NOT EXISTS tool_call_records (
@@ -309,12 +327,32 @@ class Database:
                 CREATE TABLE IF NOT EXISTS users (
                     user_id VARCHAR(255) PRIMARY KEY,
                     username VARCHAR(255) NOT NULL UNIQUE,
+                    password_hash VARCHAR(255) DEFAULT '',
                     organization_id VARCHAR(255) DEFAULT '',
                     email VARCHAR(255) DEFAULT '',
                     created_at VARCHAR(50) NOT NULL,
                     updated_at VARCHAR(50) NOT NULL
                 )
             """)
+            
+            if self.db_type == "sqlite":
+                cursor.execute("PRAGMA table_info(users)")
+                columns = [col[1] for col in cursor.fetchall()]
+                if 'password_hash' not in columns:
+                    cursor.execute("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255) DEFAULT ''")
+                if 'organization_id' not in columns:
+                    cursor.execute("ALTER TABLE users ADD COLUMN organization_id VARCHAR(255) DEFAULT ''")
+                if 'email' not in columns:
+                    cursor.execute("ALTER TABLE users ADD COLUMN email VARCHAR(255) DEFAULT ''")
+            else:
+                cursor.execute("SHOW COLUMNS FROM users")
+                columns = [col['Field'] if isinstance(col, dict) else col[0] for col in cursor.fetchall()]
+                if 'password_hash' not in columns:
+                    cursor.execute("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255) DEFAULT ''")
+                if 'organization_id' not in columns:
+                    cursor.execute("ALTER TABLE users ADD COLUMN organization_id VARCHAR(255) DEFAULT ''")
+                if 'email' not in columns:
+                    cursor.execute("ALTER TABLE users ADD COLUMN email VARCHAR(255) DEFAULT ''")
             
             conn.commit()
     
@@ -332,8 +370,8 @@ class Database:
             self._execute(
                 cursor,
                 """
-                INSERT INTO sessions (session_id, title, messages, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO sessions (session_id, title, messages, created_at, updated_at, username)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_data.session_id,
@@ -341,6 +379,7 @@ class Database:
                     json.dumps(session_data.messages, ensure_ascii=False),
                     session_data.created_at,
                     session_data.updated_at,
+                    session_data.username,
                 )
             )
         return session_data
@@ -359,7 +398,7 @@ class Database:
             self._execute(
                 cursor,
                 """
-                SELECT session_id, title, messages, created_at, updated_at
+                SELECT session_id, title, messages, created_at, updated_at, username
                 FROM sessions WHERE session_id = ?
                 """,
                 (session_id,)
@@ -375,34 +414,50 @@ class Database:
             messages=json.loads(row["messages"]) if row["messages"] else [],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            username=row.get("username", "") if isinstance(row, dict) else (row[-1] if len(row) > 5 else ""),
         )
     
     def list_sessions(
         self,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
+        username: str = None
     ) -> list[SessionModel]:
         """获取会话列表.
         
         Args:
             limit: 返回数量限制
             offset: 偏移量
+            username: 用户名过滤（可选）
             
         Returns:
             会话数据对象列表
         """
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            self._execute(
-                cursor,
-                """
-                SELECT session_id, title, messages, created_at, updated_at
-                FROM sessions
-                ORDER BY updated_at DESC
-                LIMIT ? OFFSET ?
-                """,
-                (limit, offset)
-            )
+            if username:
+                self._execute(
+                    cursor,
+                    """
+                    SELECT session_id, title, messages, created_at, updated_at, username
+                    FROM sessions
+                    WHERE username = ?
+                    ORDER BY updated_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (username, limit, offset)
+                )
+            else:
+                self._execute(
+                    cursor,
+                    """
+                    SELECT session_id, title, messages, created_at, updated_at, username
+                    FROM sessions
+                    ORDER BY updated_at DESC
+                    LIMIT ? OFFSET ?
+                    """,
+                    (limit, offset)
+                )
             rows = cursor.fetchall()
         
         sessions = []
@@ -413,6 +468,7 @@ class Database:
                 messages=json.loads(row["messages"]) if row["messages"] else [],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
+                username=row.get("username", "") if isinstance(row, dict) else (row[-1] if len(row) > 5 else ""),
             ))
         return sessions
     
@@ -879,12 +935,13 @@ class Database:
             self._execute(
                 cursor,
                 """
-                INSERT INTO users (user_id, username, organization_id, email, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO users (user_id, username, password_hash, organization_id, email, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_data.user_id,
                     user_data.username,
+                    user_data.password_hash,
                     user_data.organization_id,
                     user_data.email,
                     user_data.created_at,
@@ -892,6 +949,56 @@ class Database:
                 )
             )
         return user_data
+
+    def register_user(self, username: str, password: str, email: str = "") -> Optional[UserModel]:
+        """注册新用户（带密码哈希）.
+
+        Args:
+            username: 用户名
+            password: 明文密码
+            email: 邮箱
+
+        Returns:
+            创建的用户数据对象，失败返回None
+        """
+        from mini_agent.web.utils.auth import hash_password
+
+        existing = self.get_user_by_username(username)
+        if existing:
+            return None
+
+        import uuid
+        from datetime import datetime
+
+        user_data = UserModel(
+            user_id=str(uuid.uuid4()),
+            username=username,
+            password_hash=hash_password(password),
+            email=email,
+            organization_id="",
+            created_at=datetime.now().isoformat(),
+            updated_at=datetime.now().isoformat(),
+        )
+        return self.create_user(user_data)
+
+    def verify_user_password(self, username: str, password: str) -> Optional[UserModel]:
+        """验证用户密码.
+
+        Args:
+            username: 用户名
+            password: 明文密码
+
+        Returns:
+            用户数据对象，验证失败返回None
+        """
+        from mini_agent.web.utils.auth import verify_password
+
+        user = self.get_user_by_username(username)
+        if not user or not user.password_hash:
+            return None
+        if verify_password(password, user.password_hash):
+            return user
+        return None
 
     def get_user(self, user_id: str) -> Optional[UserModel]:
         """获取用户信息.
@@ -940,7 +1047,7 @@ class Database:
             self._execute(
                 cursor,
                 """
-                SELECT user_id, username, organization_id, email, created_at, updated_at
+                SELECT user_id, username, password_hash, organization_id, email, created_at, updated_at
                 FROM users WHERE username = ?
                 """,
                 (username,)
@@ -953,6 +1060,7 @@ class Database:
         return UserModel(
             user_id=row["user_id"],
             username=row["username"],
+            password_hash=row.get("password_hash", "") if isinstance(row, dict) else (row[2] if len(row) > 2 else ""),
             organization_id=row["organization_id"] or "",
             email=row["email"] or "",
             created_at=row["created_at"],
@@ -1003,6 +1111,29 @@ class Database:
             
             conn.commit()
         return user_data
+
+    def update_user_password(self, username: str, new_password_hash: str) -> bool:
+        """更新用户密码.
+
+        Args:
+            username: 用户名
+            new_password_hash: 新密码哈希
+
+        Returns:
+            是否更新成功
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            self._execute(
+                cursor,
+                """
+                UPDATE users
+                SET password_hash = ?, updated_at = ?
+                WHERE username = ?
+                """,
+                (new_password_hash, datetime.now().isoformat(), username)
+            )
+            return cursor.rowcount > 0
 
     def get_or_create_default_user(self) -> UserModel:
         """获取或创建默认用户.

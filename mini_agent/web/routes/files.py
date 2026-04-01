@@ -1,13 +1,18 @@
 """文件相关API路由."""
 
 import logging
+import os
+import shutil
+import asyncio
 from pathlib import Path
-from typing import Optional
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends, UploadFile, File
 
 from mini_agent.config import Config
 from mini_agent.web.database import get_database
+from mini_agent.web.dependencies import get_current_username
+from mini_agent.web.utils.vector_store import get_vector_store
 
 
 logger = logging.getLogger(__name__)
@@ -152,3 +157,170 @@ async def get_session_generated_files(session_id: str, username: str = None):
     
     logger.info(f"找到 {len(files)} 个生成文件/目录")
     return files
+
+
+@router.get(
+    "/users/files",
+    summary="获取用户所有文件",
+    description="获取当前用户上传的所有文件列表（从文件系统扫描）。"
+)
+async def get_user_files(
+    username: Annotated[str, Depends(get_current_username)],
+):
+    """获取当前用户上传的所有文件列表."""
+    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
+
+    env_workspace = Config.get_workspace_dir()
+    if env_workspace:
+        workspace = Path(env_workspace)
+    else:
+        workspace = Path("workspace")
+
+    user_dir = workspace / "users" / safe_username / "files"
+
+    files = []
+    if user_dir.exists():
+        for file_path in user_dir.iterdir():
+            if file_path.is_file():
+                stat = file_path.stat()
+                file_ext = file_path.suffix[1:] if file_path.suffix else "unknown"
+                files.append({
+                    "id": file_path.name,
+                    "filename": file_path.name,
+                    "file_path": str(file_path),
+                    "file_type": file_ext,
+                    "size": stat.st_size,
+                    "uploaded_at": stat.st_mtime,
+                    "username": username,
+                    "session_title": "",
+                })
+
+    logger.info(f"获取用户文件 | 用户: {username} | 用户目录: {user_dir} | 文件总数: {len(files)}")
+    return {"files": files}
+
+
+@router.post(
+    "/users/files/upload",
+    summary="上传文件到用户目录",
+    description="上传文件到用户目录并建立向量索引。"
+)
+async def upload_user_file(
+    username: Annotated[str, Depends(get_current_username)],
+    file: UploadFile = File(...),
+):
+    """上传文件到用户目录，返回文件信息."""
+    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
+
+    env_workspace = Config.get_workspace_dir()
+    if env_workspace:
+        workspace = Path(env_workspace)
+    else:
+        workspace = Path("workspace")
+
+    upload_dir = workspace / "users" / safe_username / "files"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = file.filename or "unknown"
+    file_path = upload_dir / filename
+
+    counter = 1
+    while file_path.exists():
+        name, ext = os.path.splitext(filename)
+        file_path = upload_dir / f"{name}_{counter}{ext}"
+        counter += 1
+
+    with file_path.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    file_size = file_path.stat().st_size
+    file_type = os.path.splitext(filename)[1][1:] if '.' in filename else 'unknown'
+
+    async def background_index_file(file_path_str: str, file_name: str, file_type: str, user: str):
+        """后台异步索引文件到向量数据库"""
+        try:
+            await asyncio.sleep(0.5)
+            vector_store = get_vector_store(user)
+            if vector_store and vector_store.config.enabled:
+                logger.info(f"[后台索引] 开始索引文件: {file_name} | 用户: {user} | 类型: {file_type}")
+                chunks_count = vector_store.add_file(
+                    file_path=file_path_str,
+                    username=user,
+                    file_type=file_type
+                )
+                if chunks_count > 0:
+                    logger.info(f"[后台索引] ✅ 文件索引完成: {file_name} | chunks: {chunks_count}")
+                else:
+                    logger.warning(f"[后台索引] ⚠️ 文件索引完成但未添加chunks: {file_name}")
+            else:
+                logger.info(f"[后台索引] 向量数据库未启用，跳过文件索引: {file_name}")
+        except Exception as e:
+            logger.error(f"[后台索引] ❌ 文件索引失败: {file_name} | 错误: {e}")
+
+    asyncio.create_task(background_index_file(str(file_path), file_path.name, file_type, username))
+
+    logger.info(f"文件上传成功 | 文件: {file_path.name} | 用户: {username}")
+    logger.info(f"[异步索引] 向量数据库索引任务已创建，将在后台执行")
+
+    return {
+        "id": file_path.name,
+        "filename": file_path.name,
+        "file_path": str(file_path),
+        "file_type": file_type,
+        "size": file_size,
+        "username": username,
+    }
+
+
+@router.delete(
+    "/users/files/{file_id}",
+    summary="删除用户文件",
+    description="删除用户目录下的指定文件。"
+)
+async def delete_user_file(
+    file_id: str,
+    username: Annotated[str, Depends(get_current_username)],
+):
+    """删除用户文件."""
+    from urllib.parse import unquote
+    file_id = unquote(file_id)
+
+    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
+
+    env_workspace = Config.get_workspace_dir()
+    if env_workspace:
+        workspace = Path(env_workspace)
+    else:
+        workspace = Path("workspace")
+
+    user_dir = workspace / "users" / safe_username / "files"
+    file_to_delete_path = user_dir / file_id
+
+    logger.info(f"[删除文件] 搜索文件 | user_dir: {user_dir} | file_id: {file_id} | safe_username: {safe_username} | username: {username}")
+    logger.info(f"[删除文件] 完整路径: {file_to_delete_path} | exists: {file_to_delete_path.exists()}")
+
+    if not file_to_delete_path.exists():
+        logger.warning(f"[删除文件] 文件不存在: {file_to_delete_path}")
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    try:
+        os.remove(file_to_delete_path)
+        logger.info(f"[删除文件] ✅ 文件系统删除成功: {file_to_delete_path}")
+    except Exception as e:
+        logger.error(f"[删除文件] ❌ 文件系统删除失败: {file_to_delete_path} | 错误: {e}")
+        raise HTTPException(status_code=500, detail=f"删除文件失败: {str(e)}")
+
+    try:
+        vector_store = get_vector_store(safe_username)
+        if vector_store and vector_store.config.enabled:
+            logger.info(f"[删除文件] 开始从向量数据库删除文件: {file_to_delete_path} | 用户: {safe_username}")
+            deleted = vector_store.delete_by_file(
+                file_path=str(file_to_delete_path),
+                username=safe_username
+            )
+            if deleted:
+                logger.info(f"[删除文件] ✅ 文件从向量数据库删除完成: {file_to_delete_path}")
+    except Exception as e:
+        logger.error(f"[删除文件] ❌ 从向量数据库删除文件失败: {file_to_delete_path} | 错误: {e}")
+
+    logger.info(f"[删除文件] ✅ 文件删除完成: {file_id}")
+    return {"status": "deleted", "filename": file_id}

@@ -20,6 +20,7 @@
         @toggleSidebar="toggleSidebar"
         @showAssets="handleShowAssets"
         @showProfile="handleShowProfile"
+        @logout="handleLogout"
       />
       
       <button 
@@ -36,9 +37,11 @@
       
       <AssetsPanel v-if="showAssets" :visible="showAssets" @close="showAssets = false" />
       
-      <UserProfile 
-        v-if="showUserProfile" 
+      <UserProfile
+        v-if="showUserProfile"
         @close="showUserProfile = false"
+        @logout="handleLogout"
+        @switch-user="handleSwitchUser"
       />
       
       <Chat
@@ -82,6 +85,7 @@ import UserProfile from './components/UserProfile.vue'
 import Welcome from './components/Welcome.vue'
 import { createSession, listSessions, getChatHistory, deleteSession, sendMessage, renameSession } from './api/chat.js'
 import { uploadFile, deleteFile, getUserProfile, getSessionGeneratedFiles } from './api/files.js'
+import { logout as apiLogout, getStoredToken, getStoredUsername, AUTH_EXPIRED_EVENT } from './api/auth.js'
 
 const sessions = ref([])
 const currentSessionId = ref(null)
@@ -130,7 +134,29 @@ function goBack() {
   }
 }
 
+async function handleLogout() {
+  apiLogout()
+  sessions.value = []
+  currentSessionId.value = null
+  messages.value = []
+  userProfile.value = {
+    username: '',
+    organization_id: '',
+    email: ''
+  }
+  showUserProfile.value = false
+  showWelcome.value = true
+}
+
 async function loadUserProfile() {
+  const storedToken = getStoredToken()
+  const storedUsername = getStoredUsername()
+
+  if (!storedToken || !storedUsername) {
+    showWelcome.value = true
+    return
+  }
+
   try {
     const profile = await getUserProfile()
     if (!profile.username || profile.username === 'default_user') {
@@ -150,7 +176,7 @@ async function loadUserProfile() {
 
 async function loadSessions() {
   try {
-    const data = await listSessions()
+    const data = await listSessions(userProfile.value.username || null)
     sessions.value = Array.isArray(data) ? data : (data.sessions || [])
   } catch (e) {
     console.error('加载会话列表失败:', e)
@@ -160,15 +186,16 @@ async function loadSessions() {
 
 async function ensureCurrentSession(initialTitle = '') {
   if (!currentSessionId.value) {
-    const newSession = await createSession(initialTitle || '新会话')
+    const newSession = await createSession(initialTitle || '新会话', userProfile.value.username || null)
     currentSessionId.value = newSession.session_id
     const existingIndex = sessions.value.findIndex(s => s.session_id === newSession.session_id)
     if (existingIndex === -1) {
-      sessions.value.unshift({
+      const session = {
         session_id: newSession.session_id,
         title: newSession.title || initialTitle || '新会话',
         created_at: newSession.created_at || new Date().toISOString()
-      })
+      }
+      sessions.value = [session, ...sessions.value]
     }
   }
   return currentSessionId.value
@@ -319,36 +346,50 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
   try {
     await sendMessage(currentSessionId.value, message, (data) => {
       const eventType = data.type || ''
-      if (eventType === 'knowledge_base检索') {
-        addBlock('knowledge_base', { content: data.content || '', file_name: data.file_name || '' })
-      } else if (eventType === 'knowledge_base_end') {
-        const idx = messages.value.findIndex(m => m.id === assistantMsgId)
-        if (idx !== -1 && messages.value[idx].blocks) {
-          const kbBlocks = messages.value[idx].blocks.filter(b => b.type === 'knowledge_base')
-          if (kbBlocks.length > 0) {
-            messages.value[idx].blocks = messages.value[idx].blocks.filter(b => b.type !== 'knowledge_base')
-            messages.value[idx].knowledge_base_results = kbBlocks.map(b => b.content)
+      if (eventType === 'knowledge_base_start') {
+        currentBlock = null
+        addBlock('knowledge_base', { docs: [] })
+      } else if (eventType === 'knowledge_base') {
+        if (data.content) {
+          console.log('[knowledge_base] content:', data.content)
+        }
+        if (data.file_name && data.score !== undefined) {
+          const idx = messages.value.findIndex(m => m.id === assistantMsgId)
+          if (idx !== -1) {
+            const kbBlock = messages.value[idx].blocks.find(b => b.type === 'knowledge_base')
+            if (kbBlock) {
+              if (!kbBlock.docs) kbBlock.docs = []
+              kbBlock.docs.push({
+                file_name: data.file_name,
+                score: data.score
+              })
+              messages.value[idx] = { ...messages.value[idx] }
+            }
           }
         }
+      } else if (eventType === 'knowledge_base_end') {
+        console.log('[knowledge_base_end] docs_count:', data.docs_count)
       } else if (eventType === 'error') {
         error.value = data.content || '发送消息失败'
       } else if (eventType === 'start') {
+        console.log('[start] Received data:', JSON.stringify(data))
         if (data.session_id) {
           currentSessionId.value = data.session_id
           const existingIdx = sessions.value.findIndex(s => s.session_id === data.session_id)
+          console.log('[start] session_id:', data.session_id, 'existingIdx:', existingIdx, 'title:', data.title)
+          const sessionTitle = data.title || (message.substring(0, 12) + '...') || '新会话'
           if (existingIdx === -1) {
-            // 使用后端返回的会话标题，如果没有则使用前端生成的标题
-            const sessionTitle = data.title || (message.substring(0, 12) + '...') || '新会话'
-            sessions.value.unshift({
+            const newSession = {
               session_id: data.session_id,
               title: sessionTitle,
               created_at: new Date().toISOString()
-            })
-          } else {
-            // 如果会话已存在，但标题可能已更新，使用后端返回的标题
-            if (data.title) {
-              sessions.value[existingIdx] = { ...sessions.value[existingIdx], title: data.title }
             }
+            sessions.value = [newSession, ...sessions.value]
+            console.log('[start] Added new session:', newSession, 'total sessions:', sessions.value.length)
+          } else {
+            sessions.value[existingIdx] = { ...sessions.value[existingIdx], title: sessionTitle }
+            sessions.value = [...sessions.value]
+            console.log('[start] Updated existing session title:', sessionTitle)
           }
         }
       } else if (eventType === 'thinking') {
@@ -428,17 +469,19 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
         if (data.session_id) {
           currentSessionId.value = data.session_id
           const existingIdx = sessions.value.findIndex(s => s.session_id === data.session_id)
+          const sessionTitle = data.title || (message.substring(0, 12) + '...') || '新会话'
           if (existingIdx === -1) {
-            const sessionTitle = data.title || (message.substring(0, 12) + '...') || '新会话'
-            sessions.value.unshift({
+            const newSession = {
               session_id: data.session_id,
               title: sessionTitle,
               created_at: new Date().toISOString()
-            })
-          } else {
-            if (data.title) {
-              sessions.value[existingIdx] = { ...sessions.value[existingIdx], title: data.title }
             }
+            sessions.value = [newSession, ...sessions.value]
+            console.log('[done] Added new session:', newSession)
+          } else {
+            sessions.value[existingIdx] = { ...sessions.value[existingIdx], title: sessionTitle }
+            sessions.value = [...sessions.value]
+            console.log('[done] Updated existing session title:', sessionTitle)
           }
         }
       }
@@ -498,6 +541,7 @@ async function handleRemoveFile(message, messageIndex, file) {
 }
 
 onMounted(async () => {
+  window.addEventListener(AUTH_EXPIRED_EVENT, handleLogout)
   await loadUserProfile()
   if (!showWelcome.value) {
     await loadSessions()

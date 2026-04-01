@@ -328,26 +328,25 @@ def get_or_create_agent(
     return agent
 
 
-async def get_or_create_agent_for_session(session_id: str, http_request=None) -> Agent:
-    """获取或创建会话的Agent实例."""
+async def get_or_create_agent_for_session(session_id: str, username: str) -> Agent:
+    """获取或创建会话的Agent实例.
+
+    Args:
+        session_id: 会话ID
+        username: 用户名
+    """
     agent = get_session_agent(session_id)
-    
+
     if agent is None:
-        username = None
-        if http_request:
-            db = get_database()
-            user = db.get_or_create_default_user()
-            username = user.username
-        
         logger.info(f"为会话 {session_id} 创建工具，username={username}")
         tools, skill_loader = await get_tools(session_id, username)
-        
+
         workspace_dir = get_workspace_dir(session_id, username)
         Path(workspace_dir).mkdir(parents=True, exist_ok=True)
-        
+
         logger.info(f"工具创建完成，使用工作目录: {workspace_dir}")
         agent = create_agent_for_session(session_id, workspace_dir, tools, skill_loader)
-    
+
     return agent
 
 
@@ -386,16 +385,17 @@ async def chat_stream_generator(
     agent: Agent,
     session_id: str,
     message_id: str,
+    username: str,
     http_request: Optional["Request"] = None,
     parsed_content: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """生成聊天流式响应."""
     start_time = time.time()
     sid = session_id[-5:] if session_id else "new"
-    
+
     message_content = parsed_content if parsed_content else request.message
-    
-    logger.info(f"[{sid}] 开始流式响应 | message: {message_content[:50]}{'...' if len(message_content) > 50 else ''} | deep_think: {request.enable_deep_think}")
+
+    logger.info(f"[{sid}] 开始流式响应 | message: {message_content[:50]}{'...' if len(message_content) > 50 else ''} | deep_think: {request.enable_deep_think} | 用户: {username}")
     
     session = db.get_session(session_id)
     
@@ -453,45 +453,57 @@ async def chat_stream_generator(
         start_event = {'type': 'start', 'session_id': session_id, 'message_id': message_id, 'title': session.title}
         yield f"data: {json.dumps(start_event, ensure_ascii=False)}\n\n"
         
+        kb_docs = []
         if request.use_knowledge_base:
-            yield f"data: {json.dumps({'type': 'thinking_start'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'knowledge_base_start'}, ensure_ascii=False)}\n\n"
 
             try:
                 from mini_agent.web.utils.vector_store import get_vector_store
-                vector_store = get_vector_store()
+                vector_store = get_vector_store(username)
 
                 if vector_store and vector_store.config.enabled:
-                    username = getattr(session, 'username', '') if session else ""
-                    yield f"data: {json.dumps({'type': 'thinking', 'content': '🔍 正在检索知识库...' + chr(10) + chr(10)}, ensure_ascii=False)}\n\n"
-                    
+                    yield f"data: {json.dumps({'type': 'knowledge_base', 'content': '🔍 正在检索知识库...'}, ensure_ascii=False)}\n\n"
+
                     search_results = vector_store.search(
                         query=message_content,
                         username=username
                     )
                     
                     if search_results:
-                        yield f"data: {json.dumps({'type': 'thinking', 'content': f'✅ 找到了{len(search_results)}篇文档' + chr(10) + chr(10)}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'knowledge_base', 'content': f'✅ 找到了{len(search_results)}篇文档'}, ensure_ascii=False)}\n\n"
                         
-                        # 显示文档列表
+                        context_parts = []
+                        
                         for i, result in enumerate(search_results, 1):
-                            file_name = result.get('file_name', '未知文件')
-                            yield f"data: {json.dumps({'type': 'thinking', 'content': f'📄 文档{i}: {file_name}' + chr(10) + chr(10)}, ensure_ascii=False)}\n\n"
-
-                        context = vector_store.get_context_for_query(
-                            query=message_content,
-                            username=username
-                        )
-                        if context:
+                            metadata = result.get('metadata', {})
+                            file_name = metadata.get('file_name', '未知文件')
+                            content = result.get('content', '')
+                            score = result.get('score', 0)
+                            
+                            logger.info(f"[知识库] 文档{i}: {file_name} | 相关度: {score:.3f}")
+                            yield f"data: {json.dumps({'type': 'knowledge_base', 'file_name': file_name, 'score': round(score, 3)}, ensure_ascii=False)}\n\n"
+                            
+                            kb_docs.append({
+                                'file_name': file_name,
+                                'score': round(score, 3),
+                                'content_preview': content[:200] if content else ''
+                            })
+                            
+                            if content:
+                                context_parts.append(content)
+                        
+                        if context_parts:
+                            context = '\n\n---\n\n'.join(context_parts)
                             message_content = f"{context}\n\n用户问题：{message_content}"
                     else:
-                        yield f"data: {json.dumps({'type': 'thinking', 'content': '⚠️ 知识库中未找到相关文档'}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'knowledge_base', 'content': '⚠️ 知识库中未找到相关文档'}, ensure_ascii=False)}\n\n"
                 else:
-                    yield f"data: {json.dumps({'type': 'thinking', 'content': '⚠️ 知识库未启用或向量数据库连接失败'}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'knowledge_base', 'content': '⚠️ 知识库未启用或向量数据库连接失败'}, ensure_ascii=False)}\n\n"
 
             except Exception as kb_error:
-                yield f"data: {json.dumps({'type': 'thinking', 'content': f'❌ 知识库检索失败：{str(kb_error)}'}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'knowledge_base', 'content': f'❌ 知识库检索失败: {str(kb_error)}'}, ensure_ascii=False)}\n\n"
 
-            yield f"data: {json.dumps({'type': 'thinking_end', 'duration': 0}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'knowledge_base_end', 'docs_count': len(kb_docs)}, ensure_ascii=False)}\n\n"
         
         event_count = 0
         # 已移除未使用的 step_start_time 变量
@@ -502,10 +514,14 @@ async def chat_stream_generator(
             
             if event_type == "thinking_start":
                 thinking_started = True
-                thinking_start_time = time.time()
+                if thinking_start_time is None:
+                    thinking_start_time = time.time()
             elif event_type == "thinking":
                 content = event.get("content", "")
-                thinking_content = (thinking_content or "") + content
+                if thinking_content is None:
+                    thinking_content = content
+                else:
+                    thinking_content = thinking_content + content
                 yield f"data: {json.dumps({'type': 'thinking', 'content': content}, ensure_ascii=False)}\n\n"
             elif event_type == "thinking_end":
                 thinking_duration = event.get("duration")
@@ -604,8 +620,10 @@ async def chat_stream_generator(
                 add_content_block()
                 event_thinking = event.get("thinking", None)
                 event_thinking_duration = event.get("thinking_duration")
+                
                 if event_thinking:
                     thinking_content = event_thinking
+                    
                 if event_thinking_duration:
                     thinking_duration_value = event_thinking_duration
                 
@@ -615,16 +633,25 @@ async def chat_stream_generator(
                 if thinking_duration_value is None and thinking_start_time and thinking_content:
                     thinking_duration_value = round(time.time() - thinking_start_time, 1)
                 
+                if kb_docs:
+                    kb_block = {
+                        "type": "knowledge_base",
+                        "docs": kb_docs,
+                        "order": 0,
+                    }
+                    content_blocks.insert(0, kb_block)
+                
                 if thinking_content:
                     thinking_block = {
                         "type": "thinking",
                         "content": thinking_content,
                         "duration": thinking_duration_value,
-                        "order": 0,
+                        "order": 1 if kb_docs else 0,
                     }
-                    content_blocks.insert(0, thinking_block)
-                    for i, block in enumerate(content_blocks):
-                        block["order"] = i
+                    content_blocks.insert(1 if kb_docs else 0, thinking_block)
+                
+                for i, block in enumerate(content_blocks):
+                    block["order"] = i
                 
                 assistant_message = {
                     "role": "assistant",
@@ -706,6 +733,7 @@ async def chat_non_stream(
             messages=[],
             created_at=now,
             updated_at=now,
+            username=username,
         )
         db.create_session(session_data)
     else:

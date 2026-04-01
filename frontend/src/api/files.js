@@ -1,3 +1,5 @@
+import { getAuthHeaders, authFetch } from './auth.js'
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
 export async function uploadFile(sessionId, file, onProgress) {
@@ -37,12 +39,18 @@ export async function uploadFile(sessionId, file, onProgress) {
     })
 
     xhr.open('POST', `${API_BASE_URL}/api/sessions/${sessionId}/upload`)
+
+    const authHeaders = getAuthHeaders()
+    for (const [key, value] of Object.entries(authHeaders)) {
+      xhr.setRequestHeader(key, value)
+    }
+
     xhr.send(formData)
   })
 }
 
 export async function getSessionFiles(sessionId) {
-  const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/files`)
+  const response = await authFetch(`${API_BASE_URL}/api/sessions/${sessionId}/files`)
 
   if (!response.ok) {
     throw new Error('获取文件列表失败')
@@ -52,7 +60,7 @@ export async function getSessionFiles(sessionId) {
 }
 
 export async function getAllFiles() {
-  const response = await fetch(`${API_BASE_URL}/api/sessions/files/all`)
+  const response = await authFetch(`${API_BASE_URL}/api/sessions/files/all`)
 
   if (!response.ok) {
     throw new Error('获取所有文件失败')
@@ -62,8 +70,8 @@ export async function getAllFiles() {
 }
 
 export async function deleteFile(sessionId, file) {
-  const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/files/${file.id}`, {
-    method: 'DELETE'
+  const response = await authFetch(`${API_BASE_URL}/api/sessions/${sessionId}/files/${file.id}`, {
+    method: 'DELETE',
   })
 
   if (!response.ok) {
@@ -74,7 +82,7 @@ export async function deleteFile(sessionId, file) {
 }
 
 export async function getUserProfile() {
-  const response = await fetch(`${API_BASE_URL}/api/user/profile`)
+  const response = await authFetch(`${API_BASE_URL}/api/user/profile`)
 
   if (!response.ok) {
     throw new Error('获取用户资料失败')
@@ -84,29 +92,28 @@ export async function getUserProfile() {
 }
 
 export async function getSessionGeneratedFiles(sessionId) {
-  const response = await fetch(`${API_BASE_URL}/api/files/session/${sessionId}`)
-  
+  const response = await authFetch(`${API_BASE_URL}/api/files/session/${sessionId}`)
+
   if (!response.ok) {
     throw new Error('获取生成的文件失败')
   }
-  
+
   return await response.json()
 }
 
 export async function getFileContent(filePath) {
-  const response = await fetch(`${API_BASE_URL}/api/files/content?file_path=${encodeURIComponent(filePath)}`)
-  
+  const response = await authFetch(`${API_BASE_URL}/api/files/content?file_path=${encodeURIComponent(filePath)}`)
+
   if (!response.ok) {
     throw new Error('获取文件内容失败')
   }
-  
+
   const text = await response.text()
   try {
     return JSON.parse(text)
   } catch {
     return text
   }
-
 }
 
 export function downloadFile(filePath, fileName) {
@@ -120,10 +127,10 @@ export function downloadFile(filePath, fileName) {
 }
 
 export async function updateUserProfile(data) {
-  const response = await fetch(`${API_BASE_URL}/api/user/profile`, {
+  const response = await authFetch(`${API_BASE_URL}/api/user/profile`, {
     method: 'PUT',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
     },
     body: JSON.stringify(data)
   })

@@ -271,8 +271,8 @@ async def get_vector_status():
             "connected": vector_store.collection is not None,
             "db_path": vector_store.config.db_path,
             "collection_name": vector_store.config.collection_name,
-            "ollama_model": vector_store.config.ollama_model,
-            "ollama_base_url": vector_store.config.ollama_base_url,
+            "embedding_provider": vector_store.config.embedding_provider,
+            "sentence_transformers_model": vector_store.config.sentence_transformers_model,
             "embedding_dimension": vector_store.config.embedding_dimension
         }
 

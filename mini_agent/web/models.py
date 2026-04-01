@@ -28,6 +28,10 @@ class CreateSessionRequest(BaseModel):
         default=None,
         description="会话标题，如果不提供则自动生成"
     )
+    username: Optional[str] = Field(
+        default=None,
+        description="用户名"
+    )
 
 
 class CreateSessionResponse(BaseModel):
@@ -179,8 +183,38 @@ class UserProfile(BaseModel):
 
 class UpdateUserProfileRequest(BaseModel):
     """更新用户资料请求模型."""
-    
+
     username: Optional[str] = Field(default=None, description="用户名")
     organization_id: Optional[str] = Field(default=None, description="机构ID")
     email: Optional[str] = Field(default=None, description="用户邮箱")
+
+
+class LoginRequest(BaseModel):
+    """登录请求模型."""
+
+    username: str = Field(..., description="用户名")
+    password: str = Field(..., description="密码", min_length=4, max_length=20)
+
+
+class RegisterRequest(BaseModel):
+    """注册请求模型."""
+
+    username: str = Field(..., description="用户名", min_length=2, max_length=50)
+    password: str = Field(..., description="密码", min_length=4, max_length=20)
+    email: Optional[str] = Field(default="", description="邮箱")
+
+
+class ResetPasswordRequest(BaseModel):
+    """重置密码请求模型."""
+
+    username: str = Field(..., description="用户名")
+    new_password: str = Field(..., description="新密码", min_length=4, max_length=20)
+
+
+class AuthResponse(BaseModel):
+    """认证响应模型."""
+
+    access_token: str = Field(..., description="访问令牌")
+    token_type: str = Field(default="bearer", description="令牌类型")
+    username: str = Field(..., description="用户名")
 

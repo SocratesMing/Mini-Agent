@@ -25,21 +25,10 @@
                 <circle cx="12" cy="7" r="4"></circle>
               </svg>
             </div>
-            <div class="user-display-name">{{ profile.username || '用户' }}</div>
+            <div class="user-display-name">{{ profile.username || '-' }}</div>
           </div>
 
           <div class="info-list">
-            <div class="info-item">
-              <div class="info-label">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                  <circle cx="12" cy="7" r="4"></circle>
-                </svg>
-                用户名
-              </div>
-              <div class="info-value">{{ profile.username || '-' }}</div>
-            </div>
-
             <div class="info-item">
               <div class="info-label">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -66,12 +55,6 @@
           <div v-if="error" class="error-message">
             {{ error }}
           </div>
-
-          <div class="form-actions">
-            <button type="button" @click="$emit('close')" class="close-action-btn">
-              关闭
-            </button>
-          </div>
         </div>
       </div>
     </div>
@@ -82,7 +65,7 @@
 import { ref, onMounted } from 'vue'
 import { getUserProfile } from '../api/files.js'
 
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'logout', 'switch-user'])
 
 const loading = ref(true)
 const error = ref('')
@@ -108,6 +91,14 @@ async function loadProfile() {
   } finally {
     loading.value = false
   }
+}
+
+function handleLogout() {
+  emit('logout')
+}
+
+function handleSwitchUser() {
+  emit('switch-user')
 }
 
 onMounted(() => {
@@ -287,11 +278,59 @@ onMounted(() => {
 
 .form-actions {
   display: flex;
-  justify-content: center;
+  gap: 12px;
   margin-top: 24px;
 }
 
+.logout-btn,
+.switch-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.logout-btn {
+  border: 1px solid #fee2e2;
+  background: white;
+  color: #dc2626;
+}
+
+.logout-btn:hover {
+  background: #fee2e2;
+  border-color: #fecaca;
+}
+
+.logout-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.switch-btn {
+  border: 1px solid #e2e8f0;
+  background: white;
+  color: #475569;
+}
+
+.switch-btn:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.switch-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
 .close-action-btn {
+  width: 100%;
   padding: 12px 48px;
   border: 1px solid #e2e8f0;
   background: white;
@@ -300,6 +339,7 @@ onMounted(() => {
   color: #475569;
   cursor: pointer;
   transition: all 0.2s;
+  margin-top: 12px;
 }
 
 .close-action-btn:hover {

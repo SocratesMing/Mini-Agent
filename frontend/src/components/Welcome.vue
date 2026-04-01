@@ -3,10 +3,11 @@
     <div class="welcome-modal">
       <div class="welcome-header">
         <div class="logo">
-          <CqLogo :size="36" />
+          <WuKongLogo :size="36" />
         </div>
-        <h1>欢迎使用 CQ-Agent</h1>
-        <p>请完善您的个人信息以开始使用</p>
+        <h1>欢迎使用 WuKong</h1>
+        <p v-if="isResetPassword">重置密码</p>
+        <p v-else>{{ isLogin ? '请登录您的账号' : '创建新账号开始使用' }}</p>
       </div>
 
       <form @submit.prevent="handleSubmit" class="welcome-form">
@@ -24,17 +25,35 @@
           />
         </div>
 
-        <div class="form-group">
-          <label for="organization">机构ID</label>
+        <div class="form-group" v-if="!isResetPassword">
+          <label for="password">
+            密码 <span class="required">*</span>
+            <span class="password-hint">（4-20位，任意字符）</span>
+          </label>
           <input
-            id="organization"
-            v-model="form.organization_id"
-            type="text"
-            placeholder="请输入机构ID（选填）"
+            id="password"
+            v-model="form.password"
+            type="password"
+            placeholder="请输入密码"
+            required
           />
         </div>
 
-        <div class="form-group">
+        <div class="form-group" v-if="isResetPassword">
+          <label for="newPassword">
+            新密码 <span class="required">*</span>
+            <span class="password-hint">（4-20位，任意字符）</span>
+          </label>
+          <input
+            id="newPassword"
+            v-model="form.newPassword"
+            type="password"
+            placeholder="请输入新密码"
+            required
+          />
+        </div>
+
+        <div class="form-group" v-if="!isLogin && !isResetPassword">
           <label for="email">用户邮箱</label>
           <input
             id="email"
@@ -48,9 +67,29 @@
           {{ error }}
         </div>
 
-        <button type="submit" class="submit-btn" :disabled="submitting || !form.username.trim()">
-          {{ submitting ? '登录中...' : '开始使用' }}
+        <div v-if="success" class="success-message">
+          {{ success }}
+        </div>
+
+        <button type="submit" class="submit-btn" :disabled="submitting || !form.username.trim() || (!isResetPassword && !form.password.trim())">
+          {{ submitting ? (isResetPassword ? '重置中...' : (isLogin ? '登录中...' : '注册中...')) : (isResetPassword ? '重置密码' : (isLogin ? '登录' : '注册')) }}
         </button>
+
+        <div class="form-footer">
+          <template v-if="isResetPassword">
+            <button type="button" @click="backToLogin" class="toggle-mode-btn">
+              返回登录
+            </button>
+          </template>
+          <template v-else>
+            <button type="button" @click="toggleMode" class="toggle-mode-btn">
+              {{ isLogin ? '还没有账号？立即注册' : '已有账号？立即登录' }}
+            </button>
+            <button v-if="isLogin" type="button" @click="goToResetPassword" class="forgot-password-btn">
+              忘记密码？
+            </button>
+          </template>
+        </div>
       </form>
     </div>
   </div>
@@ -58,20 +97,57 @@
 
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
-import { updateUserProfile } from '../api/files.js'
-import CqLogo from './CqLogo.vue'
+import { login, register, resetPassword } from '../api/auth.js'
+import WuKongLogo from './WuKongLogo.vue'
 
 const emit = defineEmits(['completed'])
 
 const usernameInput = ref(null)
 const submitting = ref(false)
 const error = ref('')
+const success = ref('')
+const isLogin = ref(true)
+const isResetPassword = ref(false)
 
 const form = ref({
   username: '',
-  organization_id: '',
-  email: ''
+  password: '',
+  email: '',
+  newPassword: ''
 })
+
+function toggleMode() {
+  isLogin.value = !isLogin.value
+  isResetPassword.value = false
+  error.value = ''
+  success.value = ''
+  form.value = {
+    username: '',
+    password: '',
+    email: '',
+    newPassword: ''
+  }
+}
+
+function goToResetPassword() {
+  isResetPassword.value = true
+  error.value = ''
+  success.value = ''
+  form.value.password = ''
+  form.value.newPassword = ''
+}
+
+function backToLogin() {
+  isResetPassword.value = false
+  error.value = ''
+  success.value = ''
+  form.value = {
+    username: '',
+    password: '',
+    email: '',
+    newPassword: ''
+  }
+}
 
 async function handleSubmit() {
   if (!form.value.username.trim()) {
@@ -79,22 +155,58 @@ async function handleSubmit() {
     return
   }
 
+  if (isResetPassword.value) {
+    if (!form.value.newPassword.trim()) {
+      error.value = '请输入新密码'
+      return
+    }
+    if (form.value.newPassword.length < 4 || form.value.newPassword.length > 20) {
+      error.value = '密码长度应为4-20位'
+      return
+    }
+  } else {
+    if (!form.value.password.trim()) {
+      error.value = '请输入密码'
+      return
+    }
+
+    if (form.value.password.length < 4 || form.value.password.length > 20) {
+      error.value = '密码长度应为4-20位'
+      return
+    }
+  }
+
   submitting.value = true
   error.value = ''
+  success.value = ''
 
   try {
-    await updateUserProfile({
-      username: form.value.username.trim(),
-      organization_id: form.value.organization_id.trim(),
-      email: form.value.email.trim()
-    })
+    if (isResetPassword.value) {
+      await resetPassword(form.value.username.trim(), form.value.newPassword)
+      success.value = '密码重置成功，请使用新密码登录'
+      setTimeout(() => {
+        backToLogin()
+      }, 1500)
+      return
+    }
+
+    let data
+    if (isLogin.value) {
+      data = await login(form.value.username.trim(), form.value.password)
+    } else {
+      data = await register(
+        form.value.username.trim(),
+        form.value.password,
+        form.value.email.trim()
+      )
+    }
+
     emit('completed', {
-      username: form.value.username.trim(),
-      organization_id: form.value.organization_id.trim(),
-      email: form.value.email.trim()
+      username: data.username,
+      token: data.access_token
     })
   } catch (e) {
-    error.value = e.message || '登录失败，请重试'
+    error.value = e.message || (isResetPassword.value ? '密码重置失败' : (isLogin.value ? '登录失败，请重试' : '注册失败，请重试'))
   } finally {
     submitting.value = false
   }
@@ -136,7 +248,9 @@ onMounted(() => {
 }
 
 .logo {
-  margin: 0 auto 20px;
+  display: flex;
+  justify-content: center;
+  margin-bottom: 20px;
 }
 
 .welcome-header h1 {
@@ -175,6 +289,13 @@ onMounted(() => {
   color: #ef4444;
 }
 
+.password-hint {
+  font-size: 12px;
+  font-weight: 400;
+  color: #94a3b8;
+  margin-left: 4px;
+}
+
 .form-group input {
   padding: 14px 16px;
   border: 1px solid #e2e8f0;
@@ -202,6 +323,14 @@ onMounted(() => {
   font-size: 14px;
 }
 
+.success-message {
+  padding: 12px 16px;
+  background: #d1fae5;
+  color: #059669;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
 .submit-btn {
   padding: 14px 24px;
   border: none;
@@ -224,5 +353,43 @@ onMounted(() => {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
+}
+
+.form-footer {
+  text-align: center;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toggle-mode-btn {
+  background: transparent;
+  border: none;
+  color: #0ea5e9;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 8px 16px;
+  transition: all 0.2s;
+}
+
+.toggle-mode-btn:hover {
+  color: #0284c7;
+  text-decoration: underline;
+}
+
+.forgot-password-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 16px;
+  transition: all 0.2s;
+}
+
+.forgot-password-btn:hover {
+  color: #64748b;
+  text-decoration: underline;
 }
 </style>

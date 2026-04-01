@@ -49,7 +49,7 @@ class FileParser:
                 return FileParser._extract_code_file(file_path, suffix)
 
         except Exception as e:
-            logger.error(f"提取文件内容失败: {e}")
+            logger.error(f"提取文件内容失败：{e}")
             return ""
 
     @staticmethod
@@ -72,7 +72,7 @@ class FileParser:
             logger.error("请安装 PyPDF2: pip install PyPDF2")
             return ""
         except Exception as e:
-            logger.error(f"PDF 提取失败: {e}")
+            logger.error(f"PDF 提取失败：{e}")
             return ""
 
     @staticmethod
@@ -81,9 +81,9 @@ class FileParser:
         try:
             from docx import Document
 
-            logger.info(f"[FileParser] 尝试打开 docx 文件: {file_path}")
+            logger.info(f"[FileParser] 尝试打开 docx 文件：{file_path}")
             doc = Document(file_path)
-            logger.info(f"[FileParser] docx 文件已打开，段落数: {len(doc.paragraphs)}, 表格数: {len(doc.tables)}")
+            logger.info(f"[FileParser] docx 文件已打开，段落数：{len(doc.paragraphs)}, 表格数：{len(doc.tables)}")
             texts = []
 
             for para in doc.paragraphs:
@@ -100,48 +100,106 @@ class FileParser:
                         texts.append(" | ".join(row_texts))
 
             result = "\n\n".join(texts)
-            logger.info(f"[FileParser] docx 提取完成，文本长度: {len(result)}")
+            logger.info(f"[FileParser] docx 提取完成，文本长度：{len(result)}")
             return result
 
         except ImportError:
             logger.error("请安装 python-docx: pip install python-docx")
             return ""
         except Exception as e:
-            logger.error(f"DOCX 提取失败: {e}", exc_info=True)
+            logger.error(f"DOCX 提取失败：{e}", exc_info=True)
             return ""
 
     @staticmethod
     def _extract_excel(file_path: str) -> str:
-        """提取 Excel 内容"""
+        """提取 Excel 内容（增强版：支持计息表格）"""
         try:
             import openpyxl
-            logger.info(f"[FileParser] 尝试打开 xlsx 文件: {file_path}")
+            logger.info(f"[FileParser] 尝试打开 xlsx 文件：{file_path}")
 
             wb = openpyxl.load_workbook(file_path, data_only=True)
-            logger.info(f"[FileParser] xlsx 文件已打开，sheet 数: {len(wb.sheetnames)}")
+            logger.info(f"[FileParser] xlsx 文件已打开，sheet 数：{len(wb.sheetnames)}")
             texts = []
+
+            # 计息相关的列名关键词
+            interest_keywords = ['利息', '利率', '计息', '本金', '金额', '天数', '起息', '到期', '逾期', '罚息', '复利']
+            
+            # 需要格式化的数值列关键词
+            amount_keywords = ['金额', '本金', '利息', '余额', '总额', '合计', '利率', '比例']
 
             for sheet_name in wb.sheetnames:
                 sheet = wb[sheet_name]
                 texts.append(f"[Sheet: {sheet_name}]")
 
-                for row in sheet.iter_rows(values_only=True):
-                    row_texts = [str(cell) if cell is not None else "" for cell in row]
-                    row_content = " | ".join(t for t in row_texts if t)
-                    if row_content:
-                        texts.append(row_content)
+                # 获取表头（第一行）
+                headers = []
+                header_row = next(sheet.iter_rows(min_row=1, max_row=1, values_only=True))
+                if header_row:
+                    headers = [str(cell).strip() if cell is not None else "" for cell in header_row]
+                
+                # 检测是否包含计息相关列
+                is_interest_sheet = any(
+                    any(kw in header for kw in interest_keywords)
+                    for header in headers if header
+                )
+                
+                logger.info(f"[FileParser] Sheet '{sheet_name}' 是否计息表：{is_interest_sheet}")
+                
+                # 识别金额列的索引
+                amount_columns = []
+                if headers:
+                    for i, header in enumerate(headers):
+                        if any(kw in header for kw in amount_keywords):
+                            amount_columns.append(i)
+                
+                # 处理数据行（从第 2 行开始）
+                for row_idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+                    if not any(cell is not None for cell in row):
+                        continue
+                    
+                    row_texts = []
+                    for col_idx, cell in enumerate(row):
+                        if cell is None:
+                            continue
+                        
+                        # 如果是金额列，格式化数值
+                        if col_idx in amount_columns:
+                            try:
+                                if isinstance(cell, (int, float)):
+                                    header = headers[col_idx] if col_idx < len(headers) else ""
+                                    if '利率' in header or '比例' in header:
+                                        # 格式化为百分比
+                                        formatted = f"{cell * 100:.2f}%"
+                                    else:
+                                        # 格式化为金额，保留两位小数
+                                        formatted = f"{cell:,.2f}"
+                                    row_texts.append(f"{headers[col_idx] if col_idx < len(headers) else ''}:{formatted}")
+                                    continue
+                            except (ValueError, TypeError):
+                                pass
+                        
+                        # 默认处理
+                        cell_str = str(cell).strip()
+                        if cell_str:
+                            if col_idx < len(headers) and headers[col_idx]:
+                                row_texts.append(f"{headers[col_idx]}:{cell_str}")
+                            else:
+                                row_texts.append(cell_str)
+                    
+                    if row_texts:
+                        texts.append(" | ".join(row_texts))
 
                 texts.append("")
 
             result = "\n".join(texts)
-            logger.info(f"[FileParser] xlsx 提取完成，文本长度: {len(result)}")
+            logger.info(f"[FileParser] xlsx 提取完成，文本长度：{len(result)}")
             return result
 
         except ImportError:
             logger.error("请安装 openpyxl: pip install openpyxl")
             return ""
         except Exception as e:
-            logger.error(f"Excel 提取失败: {e}", exc_info=True)
+            logger.error(f"Excel 提取失败：{e}", exc_info=True)
             return ""
 
     @staticmethod
@@ -153,7 +211,7 @@ class FileParser:
             for encoding in encodings:
                 try:
                     content = Path(file_path).read_text(encoding=encoding)
-                    logger.info(f"[FileParser] _extract_txt 读取文件: {file_path}, 长度: {len(content)}, 前100字符: {repr(content[:100])}")
+                    logger.info(f"[FileParser] _extract_txt 读取文件：{file_path}, 长度：{len(content)}, 前 100 字符：{repr(content[:100])}")
                     return content
                 except UnicodeDecodeError:
                     continue
@@ -161,7 +219,7 @@ class FileParser:
             return ""
 
         except Exception as e:
-            logger.error(f"文本文件读取失败: {e}")
+            logger.error(f"文本文件读取失败：{e}")
             return ""
 
     @staticmethod
@@ -190,7 +248,7 @@ class FileParser:
             logger.error("请安装 python-pptx: pip install python-pptx")
             return ""
         except Exception as e:
-            logger.error(f"PPTX 提取失败: {e}")
+            logger.error(f"PPTX 提取失败：{e}")
             return ""
 
     @staticmethod
@@ -217,7 +275,7 @@ class FileParser:
             return "\n".join(texts)
 
         except Exception as e:
-            logger.error(f"CSV 提取失败: {e}")
+            logger.error(f"CSV 提取失败：{e}")
             return ""
 
     @staticmethod
@@ -257,7 +315,7 @@ class FileParser:
             return "\n".join(flatten(data))
 
         except Exception as e:
-            logger.error(f"JSON 提取失败: {e}")
+            logger.error(f"JSON 提取失败：{e}")
             return ""
 
     @staticmethod
@@ -293,7 +351,7 @@ class FileParser:
             return "\n".join(extract_text(root))
 
         except Exception as e:
-            logger.error(f"XML 提取失败: {e}")
+            logger.error(f"XML 提取失败：{e}")
             return ""
 
     @staticmethod
@@ -330,7 +388,7 @@ class FileParser:
             logger.error("请安装 beautifulsoup4: pip install beautifulsoup4")
             return ""
         except Exception as e:
-            logger.error(f"HTML 提取失败: {e}")
+            logger.error(f"HTML 提取失败：{e}")
             return ""
 
     @staticmethod
@@ -378,5 +436,5 @@ class FileParser:
             return f"// {lang} Code File\n// Lines: {len(lines)}\n\n" + "\n".join(code_lines)
 
         except Exception as e:
-            logger.error(f"代码文件读取失败: {e}")
+            logger.error(f"代码文件读取失败：{e}")
             return ""

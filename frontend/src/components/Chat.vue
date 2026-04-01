@@ -3,10 +3,10 @@
     <div class="chat-messages" ref="messagesRef">
       <div v-if="messages.length === 0" class="welcome-screen">
         <div class="welcome-icon">
-          <CqLogo :size="64" />
+          <WuKongLogo :size="64" />
         </div>
-        <h2>我是 CQ-Agent</h2>
-        <p>请输入策略需求或因子需求</p>
+        <h2>{{ displayedTitle }}</h2>
+        <p>{{ displayedSubtitle }}</p>
       </div>
       
       <div
@@ -129,10 +129,10 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, computed, onMounted } from 'vue'
+import { ref, watch, nextTick, computed, onMounted, onUnmounted } from 'vue'
 import ChatMessage from './ChatMessage.vue'
 import ChatInput from './ChatInput.vue'
-import CqLogo from './CqLogo.vue'
+import WuKongLogo from './WuKongLogo.vue'
 import FileIcon from './FileIcon.vue'
 import FileTreeNode from './FileTreeNode.vue'
 import CodePreview from './CodePreview.vue'
@@ -149,6 +149,48 @@ const md = new MarkdownIt({
   breaks: true
 })
 import { getSessionGeneratedFiles, getFileContent, downloadFile } from '../api/files'
+
+const welcomeTitle = '我是悟空'
+const welcomeSubtitle = '专注于金融市场领域的通用智能体，有什么可以帮您？'
+const displayedTitle = ref('')
+const displayedSubtitle = ref('')
+let titleTimer = null
+let subtitleTimer = null
+
+function startTypingEffect() {
+  if (titleTimer) {
+    clearInterval(titleTimer)
+    titleTimer = null
+  }
+  if (subtitleTimer) {
+    clearInterval(subtitleTimer)
+    subtitleTimer = null
+  }
+
+  displayedTitle.value = welcomeTitle
+  displayedSubtitle.value = ''
+
+  let subtitleIndex = 0
+
+  subtitleTimer = setInterval(() => {
+    if (subtitleIndex < welcomeSubtitle.length) {
+      displayedSubtitle.value += welcomeSubtitle[subtitleIndex]
+      subtitleIndex++
+    } else {
+      clearInterval(subtitleTimer)
+      subtitleTimer = null
+    }
+  }, 50)
+}
+
+onMounted(() => {
+  startTypingEffect()
+})
+
+onUnmounted(() => {
+  if (titleTimer) clearInterval(titleTimer)
+  if (subtitleTimer) clearInterval(subtitleTimer)
+})
 
 const props = defineProps({
   messages: {
@@ -170,6 +212,12 @@ const props = defineProps({
   scrollTrigger: {
     type: Number,
     default: 0
+  }
+})
+
+watch(() => props.messages, (newMessages) => {
+  if (newMessages.length === 0) {
+    startTypingEffect()
   }
 })
 

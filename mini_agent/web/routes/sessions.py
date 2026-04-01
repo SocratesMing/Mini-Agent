@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, Response
 
 from mini_agent.config import Config
 from mini_agent.web.database import Database, SessionModel, get_database
+from mini_agent.web.dependencies import get_current_username
 from mini_agent.web.models import (
     CreateSessionRequest,
     CreateSessionResponse,
@@ -136,9 +137,10 @@ async def create_session(
     """创建新会话并存储到 SQLite 数据库."""
     session_id = str(uuid.uuid4())
     title = request.title if request.title else "未命名会话"
+    username = request.username or ""
     now = datetime.now().isoformat()
     
-    logger.info(f"创建会话 | ID: {session_id} | 标题: {title}")
+    logger.info(f"创建会话 | ID: {session_id} | 标题: {title} | 用户: {username}")
     
     session_data = SessionModel(
         session_id=session_id,
@@ -146,6 +148,7 @@ async def create_session(
         messages=[],
         created_at=now,
         updated_at=now,
+        username=username,
     )
     
     db.create_session(session_data)
@@ -169,13 +172,14 @@ async def create_session(
 )
 async def list_sessions(
     db: Annotated[Database, Depends(get_database)],
+    username: Annotated[Optional[str], Query(description="用户名过滤")] = None,
     limit: Annotated[int, Query(ge=1, le=100, description="返回数量限制")] = 50,
     offset: Annotated[int, Query(ge=0, description="偏移量")] = 0,
 ):
     """从 SQLite 数据库获取会话列表."""
-    logger.info(f"查询会话列表 | limit: {limit} | offset: {offset}")
+    logger.info(f"查询会话列表 | username: {username} | limit: {limit} | offset: {offset}")
     
-    sessions = db.list_sessions(limit=limit, offset=offset)
+    sessions = db.list_sessions(limit=limit, offset=offset, username=username)
     
     logger.info(f"会话列表查询成功 | 总数: {len(sessions)}")
     
@@ -198,13 +202,18 @@ async def list_sessions(
 )
 async def get_all_files(
     db: Annotated[Database, Depends(get_database)],
+    username: Annotated[str, Depends(get_current_username)],
 ):
     """获取当前用户上传的所有文件列表（从文件系统扫描）."""
-    user = db.get_or_create_default_user()
-    username = user.username
-    
     safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
-    user_dir = Path("workspace") / "users" / safe_username / "files"
+    
+    env_workspace = Config.get_workspace_dir()
+    if env_workspace:
+        workspace = Path(env_workspace)
+    else:
+        workspace = Path("workspace")
+    
+    user_dir = workspace / "users" / safe_username / "files"
     
     files = []
     if user_dir.exists():
@@ -239,15 +248,20 @@ async def get_all_files(
 async def download_file(
     filename: str,
     db: Annotated[Database, Depends(get_database)],
+    username: Annotated[str, Depends(get_current_username)],
 ):
     """下载文件."""
     from fastapi.responses import FileResponse
     
-    user = db.get_or_create_default_user()
-    username = user.username
-    
     safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
-    user_dir = Path("workspace") / "users" / safe_username / "files"
+    
+    env_workspace = Config.get_workspace_dir()
+    if env_workspace:
+        workspace = Path(env_workspace)
+    else:
+        workspace = Path("workspace")
+    
+    user_dir = workspace / "users" / safe_username / "files"
     file_path = user_dir / filename
     
     if not file_path.exists() or not file_path.is_file():
@@ -311,6 +325,7 @@ async def get_session(
 async def delete_session(
     session_id: str,
     db: Annotated[Database, Depends(get_database)],
+    username: Annotated[str, Depends(get_current_username)],
 ):
     """从 SQLite 数据库删除会话及其关联文件."""
     session = db.get_session(session_id)
@@ -338,11 +353,8 @@ async def delete_session(
         project_root = Path(__file__).parent.parent.parent
         workspace = project_root / "workspace"
     
-    db_for_user = get_database()
-    user = db_for_user.get_or_create_default_user()
-    username = user.username
     safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
-    session_workspace = workspace / safe_username / session_id
+    session_workspace = workspace / "users" / safe_username / session_id
     
     if session_workspace.exists() and session_workspace.is_dir():
         try:
@@ -396,12 +408,10 @@ async def update_session_title(
 async def upload_file(
     session_id: str,
     db: Annotated[Database, Depends(get_database)],
+    username: Annotated[str, Depends(get_current_username)],
     file: UploadFile = File(...),
 ):
     """上传文件到会话目录，返回文件路径供 AI 读取."""
-    user = db.get_or_create_default_user()
-    username = user.username
-
     safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
 
     env_workspace = Config.get_workspace_dir()
@@ -449,7 +459,7 @@ async def upload_file(
         """后台异步索引文件到向量数据库"""
         try:
             await asyncio.sleep(0.5)
-            vector_store = get_vector_store()
+            vector_store = get_vector_store(user)
             if vector_store and vector_store.config.enabled:
                 logger.info(f"[后台索引] 开始索引文件: {file_name} | 用户: {user} | 类型: {file_type}")
                 chunks_count = vector_store.add_file(
@@ -509,21 +519,33 @@ async def delete_session_file(
     session_id: str,
     file_id: str,
     db: Annotated[Database, Depends(get_database)],
+    username: Annotated[str, Depends(get_current_username)],
 ):
     """删除会话文件并移除文件系统中的文件."""
     from urllib.parse import unquote
     file_id = unquote(file_id)
 
-    user = db.get_or_create_default_user()
-    username = user.username
     safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
+    
+    env_workspace = Config.get_workspace_dir()
+    if env_workspace:
+        workspace = Path(env_workspace)
+    else:
+        workspace = Path("workspace")
 
     if session_id == "files":
         files = []
-        user_dir = Path("workspace") / "users" / safe_username / "files"
+        user_dir = workspace / "users" / safe_username / "files"
+        logger.info(f"[删除文件] 搜索文件 | session_id: {session_id} | user_dir: {user_dir} | file_id: {file_id} | safe_username: {safe_username} | username: {username}")
+        logger.info(f"[删除文件] 完整路径: {user_dir / file_id} | exists: {(user_dir / file_id).exists()}")
         if user_dir.exists():
+            logger.info(f"[删除文件] 用户目录存在，遍历文件...")
+            actual_files = list(user_dir.iterdir())
+            logger.info(f"[删除文件] 目录中的文件列表: {[fp.name for fp in actual_files]}")
             for fp in user_dir.iterdir():
+                logger.info(f"[删除文件] 比较: fp.name={fp.name} == file_id={file_id} ? {fp.name == file_id}")
                 if fp.is_file() and fp.name == file_id:
+                    logger.info(f"[删除文件] 找到匹配文件: {fp}")
                     file_to_delete = {
                         "id": fp.name,
                         "filename": fp.name,
@@ -533,8 +555,11 @@ async def delete_session_file(
                         "username": safe_username,
                     }
                     files.append(file_to_delete)
+        else:
+            logger.warning(f"[删除文件] 用户目录不存在: {user_dir}")
 
         if not files:
+            logger.warning(f"[删除文件] 文件不存在 | file_id: {file_id} | 搜索目录: {user_dir}")
             raise HTTPException(status_code=404, detail="文件不存在")
         file_to_delete = files[0]
     else:
@@ -569,14 +594,15 @@ async def delete_session_file(
                 logger.warning(f"[后台删除] 文件不存在 | 文件: {file_path}")
 
             try:
-                vector_store = get_vector_store()
+                vector_store = get_vector_store(file_username)
                 if vector_store and vector_store.config.enabled:
                     logger.info(f"[后台删除] 开始从向量数据库删除文件: {file_path} | 用户: {file_username}")
-                    deleted_count = vector_store.delete_file(
+                    deleted = vector_store.delete_by_file(
                         file_path=file_path,
                         username=file_username
                     )
-                    logger.info(f"[后台删除] ✅ 文件从向量数据库删除完成: {file_path} | 删除chunks: {deleted_count}")
+                    if deleted:
+                        logger.info(f"[后台删除] ✅ 文件从向量数据库删除完成: {file_path}")
             except Exception as e:
                 logger.error(f"[后台删除] ❌ 从向量数据库删除文件失败: {file_path} | 错误: {e}")
 

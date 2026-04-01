@@ -236,7 +236,14 @@ const currentFiles = computed(() => {
 async function refreshAssets() {
   loading.value = true
   try {
-    const data = await getAllFiles()
+    const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+    const { getAuthHeaders } = await import('../api/auth.js')
+    const response = await fetch(`${API_BASE_URL}/api/files/users/files`, {
+      headers: {
+        ...getAuthHeaders()
+      }
+    })
+    const data = await response.json()
     allFiles.value = data.files || []
   } catch (e) {
     console.error('获取资产失败:', e)
@@ -251,15 +258,19 @@ async function handleUpload(event) {
 
   uploading.value = true
 
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+  const { getAuthHeaders } = await import('../api/auth.js')
+
   for (const file of files) {
     try {
       const formData = new FormData()
       formData.append('file', file)
-      formData.append('session_id', 'default')
 
-      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-      const response = await fetch(`${API_BASE_URL}/api/sessions/default/upload`, {
+      const response = await fetch(`${API_BASE_URL}/api/files/users/files/upload`, {
         method: 'POST',
+        headers: {
+          ...getAuthHeaders()
+        },
         body: formData
       })
 
@@ -316,9 +327,12 @@ async function handleDelete(file) {
 
   try {
     const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-    const sessionId = file.session_id || 'files'
-    const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/files/${encodeURIComponent(file.id)}`, {
-      method: 'DELETE'
+    const { getAuthHeaders } = await import('../api/auth.js')
+    const response = await fetch(`${API_BASE_URL}/api/files/users/files/${encodeURIComponent(file.id)}`, {
+      method: 'DELETE',
+      headers: {
+        ...getAuthHeaders()
+      }
     })
 
     if (response.ok) {

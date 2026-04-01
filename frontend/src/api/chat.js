@@ -1,39 +1,53 @@
+import { getAuthHeaders, authFetch } from './auth.js'
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
-export async function createSession(title) {
-  const response = await fetch(`${API_BASE_URL}/api/sessions`, {
+export async function createSession(title, username = null) {
+  const body = { title }
+  if (username) {
+    body.username = username
+  }
+  const response = await authFetch(`${API_BASE_URL}/api/sessions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title })
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body)
   })
   if (!response.ok) throw new Error('创建会话失败')
   return response.json()
 }
 
-export async function listSessions() {
-  const response = await fetch(`${API_BASE_URL}/api/sessions`)
+export async function listSessions(username = null) {
+  let url = `${API_BASE_URL}/api/sessions`
+  if (username) {
+    url += `?username=${encodeURIComponent(username)}`
+  }
+  const response = await authFetch(url)
   if (!response.ok) throw new Error('获取会话列表失败')
   return response.json()
 }
 
 export async function getSession(sessionId) {
-  const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`)
+  const response = await authFetch(`${API_BASE_URL}/api/sessions/${sessionId}`)
   if (!response.ok) throw new Error('获取会话失败')
   return response.json()
 }
 
 export async function deleteSession(sessionId) {
-  const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`, {
-    method: 'DELETE'
+  const response = await authFetch(`${API_BASE_URL}/api/sessions/${sessionId}`, {
+    method: 'DELETE',
   })
   if (!response.ok) throw new Error('删除会话失败')
   return response.json()
 }
 
 export async function renameSession(sessionId, title) {
-  const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/title`, {
+  const response = await authFetch(`${API_BASE_URL}/api/sessions/${sessionId}/title`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({ title })
   })
   if (!response.ok) throw new Error('重命名会话失败')
@@ -41,7 +55,7 @@ export async function renameSession(sessionId, title) {
 }
 
 export async function getChatHistory(sessionId) {
-  const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`)
+  const response = await authFetch(`${API_BASE_URL}/api/sessions/${sessionId}`)
   if (!response.ok) throw new Error('获取聊天历史失败')
   const data = await response.json()
   return { messages: data.messages || [] }
@@ -51,9 +65,11 @@ export async function sendMessage(sessionId, message, onChunk, signal, enableDee
   const controller = new AbortController()
   const abortSignal = signal || controller.signal
 
-  const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
+  const response = await authFetch(`${API_BASE_URL}/api/chat/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({
       session_id: sessionId,
       message,
