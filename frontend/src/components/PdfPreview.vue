@@ -41,8 +41,8 @@
 
 <script setup>
 import { ref, onMounted, watch, onUnmounted } from 'vue'
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf'
-import pdfjsWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.js?url'
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs'
+import pdfjsWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -62,8 +62,8 @@ const loading = ref(true)
 const errorMsg = ref('')
 let pdfDoc = null
 
-const CMAP_URL = 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/'
-const STANDARD_FONT_DATA_URL = 'https://unpkg.com/pdfjs-dist@3.11.174/standard_fonts/'
+const CMAP_URL = 'https://unpkg.com/pdfjs-dist@4.10.38/cmaps/'
+const STANDARD_FONT_DATA_URL = 'https://unpkg.com/pdfjs-dist@4.10.38/standard_fonts/'
 
 async function loadPdf() {
   if (!props.fileUrl) return

@@ -99,13 +99,11 @@ async def get_file_binary(file_path: str = Query(..., description="文件路径"
 
 
 @router.get("/session/{session_id}")
-async def get_session_generated_files(session_id: str, username: str = None):
+async def get_session_generated_files(
+    session_id: str,
+    username: Annotated[str, Depends(get_current_username)]
+):
     """获取会话生成的文件列表（从workspace目录读取）."""
-    if username is None:
-        db = get_database()
-        user = db.get_or_create_default_user()
-        username = user.username
-    
     session_dir = get_user_chat_dir(session_id, username)
     
     logger.info(f"检查生成文件目录: {session_dir}")

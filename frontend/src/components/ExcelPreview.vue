@@ -32,7 +32,7 @@
 
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 
 const props = defineProps({
   fileUrl: {
@@ -51,12 +51,19 @@ async function loadExcel() {
     const response = await fetch(props.fileUrl)
     const arrayBuffer = await response.arrayBuffer()
     
-    const workbook = XLSX.read(arrayBuffer, { type: 'array' })
+    const workbook = new ExcelJS.Workbook()
+    await workbook.xlsx.load(arrayBuffer)
     
-    sheets.value = workbook.SheetNames.map(name => {
-      const worksheet = workbook.Sheets[name]
-      const data = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' })
-      return { name, data }
+    sheets.value = workbook.worksheets.map(ws => {
+      const data = []
+      ws.eachRow((row, rowNumber) => {
+        const rowData = []
+        row.eachCell({ includeEmpty: true }, cell => {
+          rowData[cell.column - 1] = cell.value ?? ''
+        })
+        data.push(rowData)
+      })
+      return { name: ws.name, data }
     })
     
     activeSheet.value = 0

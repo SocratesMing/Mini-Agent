@@ -245,20 +245,21 @@ class VectorStore:
 
             modelscope_cache = os.path.join(os.getcwd(), "models")
             modelscope_model_path = os.path.join(modelscope_cache, model_name)
+            model_name_only = model_name.split("/")[-1]
+            modelscope_model_path_alt = os.path.join(modelscope_cache, model_name_only)
 
             logger.info(f"加载 Sentence Transformers 模型：{model_name}")
             logger.info(f"本地模型目录: {modelscope_cache}")
 
+            cache_folder = None
             if os.path.exists(modelscope_model_path):
-                logger.info(
-                    f"✅ 从 ModelScope 缓存加载模型: {modelscope_model_path}"
-                )
+                logger.info(f"✅ 从本地缓存加载模型: {modelscope_model_path}")
                 cache_folder = modelscope_model_path
+            elif os.path.exists(modelscope_model_path_alt):
+                logger.info(f"✅ 从本地缓存加载模型: {modelscope_model_path_alt}")
+                cache_folder = modelscope_model_path_alt
             else:
-                logger.info(
-                    f"从 HuggingFace 下载并加载模型: {model_name}"
-                )
-                cache_folder = None
+                logger.info(f"从 HuggingFace 下载并加载模型: {model_name}")
 
             if cache_folder:
                 model_instance = SentenceTransformer(cache_folder)

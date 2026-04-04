@@ -90,6 +90,34 @@ import { logout as apiLogout, getStoredToken, getStoredUsername, AUTH_EXPIRED_EV
 const sessions = ref([])
 const currentSessionId = ref(null)
 const currentSessionHasFiles = ref(false)
+let filesCheckTimer = null
+
+async function refreshSessionFiles(sessionId = null, delayMs = 0) {
+  const targetId = sessionId || currentSessionId.value
+  if (!targetId) {
+    currentSessionHasFiles.value = false
+    return
+  }
+  if (filesCheckTimer) {
+    clearTimeout(filesCheckTimer)
+    filesCheckTimer = null
+  }
+  const doCheck = async () => {
+    try {
+      const files = await getSessionGeneratedFiles(targetId)
+      currentSessionHasFiles.value = Array.isArray(files) && files.length > 0
+      console.log('[Files] Session', targetId, 'has files:', currentSessionHasFiles.value, 'count:', files?.length)
+    } catch (e) {
+      console.error('[Files] 检查会话文件失败:', e)
+      currentSessionHasFiles.value = false
+    }
+  }
+  if (delayMs > 0) {
+    filesCheckTimer = setTimeout(doCheck, delayMs)
+  } else {
+    await doCheck()
+  }
+}
 const messages = ref([])
 const isStreaming = ref(false)
 const error = ref(null)
@@ -218,7 +246,7 @@ async function handleCreateSession() {
   showAssets.value = false
   currentSessionId.value = null
   messages.value = []
-  currentSessionHasFiles.value = false
+  refreshSessionFiles(null)
 }
 
 async function handleSelectSession(sessionId) {
@@ -230,12 +258,11 @@ async function handleSelectSession(sessionId) {
     messages.value = history.messages || []
     scrollTrigger.value++
     
-    const files = await getSessionGeneratedFiles(sessionId)
-    currentSessionHasFiles.value = files && files.length > 0
+    await refreshSessionFiles(sessionId)
   } catch (e) {
     console.error('加载聊天历史失败:', e)
     error.value = '加载聊天历史失败'
-    currentSessionHasFiles.value = false
+    refreshSessionFiles(sessionId)
   }
 }
 
@@ -500,9 +527,7 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
       }
     }, signal, enableDeepThink, files, enableKnowledgeBase)
     
-    const generatedFiles = await getSessionGeneratedFiles(currentSessionId.value)
-    console.log('[DEBUG] Generated files:', generatedFiles, 'hasFiles:', generatedFiles && generatedFiles.length > 0)
-    currentSessionHasFiles.value = generatedFiles && generatedFiles.length > 0
+    await refreshSessionFiles(null, 500)
   } catch (e) {
     if (e.name === 'AbortError') {
       return
