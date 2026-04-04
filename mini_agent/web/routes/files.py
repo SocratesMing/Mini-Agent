@@ -13,6 +13,7 @@ from mini_agent.config import Config
 from mini_agent.web.database import get_database
 from mini_agent.web.dependencies import get_current_username
 from mini_agent.web.utils.vector_store import get_vector_store
+from mini_agent.web.service.chat_service import get_user_upload_dir, get_user_chat_dir
 
 
 logger = logging.getLogger(__name__)
@@ -105,15 +106,7 @@ async def get_session_generated_files(session_id: str, username: str = None):
         user = db.get_or_create_default_user()
         username = user.username
     
-    env_workspace = Config.get_workspace_dir()
-    if env_workspace:
-        workspace = Path(env_workspace)
-    else:
-        project_root = Path(__file__).parent.parent.parent
-        workspace = project_root / "workspace"
-    
-    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
-    session_dir = workspace / safe_username / session_id
+    session_dir = get_user_chat_dir(session_id, username)
     
     logger.info(f"检查生成文件目录: {session_dir}")
     
@@ -168,19 +161,11 @@ async def get_user_files(
     username: Annotated[str, Depends(get_current_username)],
 ):
     """获取当前用户上传的所有文件列表."""
-    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
-
-    env_workspace = Config.get_workspace_dir()
-    if env_workspace:
-        workspace = Path(env_workspace)
-    else:
-        workspace = Path("workspace")
-
-    user_dir = workspace / "users" / safe_username / "files"
+    upload_dir = get_user_upload_dir(username)
 
     files = []
-    if user_dir.exists():
-        for file_path in user_dir.iterdir():
+    if upload_dir.exists():
+        for file_path in upload_dir.iterdir():
             if file_path.is_file():
                 stat = file_path.stat()
                 file_ext = file_path.suffix[1:] if file_path.suffix else "unknown"
@@ -195,7 +180,7 @@ async def get_user_files(
                     "session_title": "",
                 })
 
-    logger.info(f"获取用户文件 | 用户: {username} | 用户目录: {user_dir} | 文件总数: {len(files)}")
+    logger.info(f"获取用户文件 | 用户: {username} | 用户目录: {upload_dir} | 文件总数: {len(files)}")
     return {"files": files}
 
 
@@ -209,16 +194,7 @@ async def upload_user_file(
     file: UploadFile = File(...),
 ):
     """上传文件到用户目录，返回文件信息."""
-    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
-
-    env_workspace = Config.get_workspace_dir()
-    if env_workspace:
-        workspace = Path(env_workspace)
-    else:
-        workspace = Path("workspace")
-
-    upload_dir = workspace / "users" / safe_username / "files"
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    upload_dir = get_user_upload_dir(username)
 
     filename = file.filename or "unknown"
     file_path = upload_dir / filename
@@ -284,18 +260,10 @@ async def delete_user_file(
     from urllib.parse import unquote
     file_id = unquote(file_id)
 
-    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
+    upload_dir = get_user_upload_dir(username)
+    file_to_delete_path = upload_dir / file_id
 
-    env_workspace = Config.get_workspace_dir()
-    if env_workspace:
-        workspace = Path(env_workspace)
-    else:
-        workspace = Path("workspace")
-
-    user_dir = workspace / "users" / safe_username / "files"
-    file_to_delete_path = user_dir / file_id
-
-    logger.info(f"[删除文件] 搜索文件 | user_dir: {user_dir} | file_id: {file_id} | safe_username: {safe_username} | username: {username}")
+    logger.info(f"[删除文件] 搜索文件 | upload_dir: {upload_dir} | file_id: {file_id} | username: {username}")
     logger.info(f"[删除文件] 完整路径: {file_to_delete_path} | exists: {file_to_delete_path.exists()}")
 
     if not file_to_delete_path.exists():
@@ -310,12 +278,12 @@ async def delete_user_file(
         raise HTTPException(status_code=500, detail=f"删除文件失败: {str(e)}")
 
     try:
-        vector_store = get_vector_store(safe_username)
+        vector_store = get_vector_store(username)
         if vector_store and vector_store.config.enabled:
-            logger.info(f"[删除文件] 开始从向量数据库删除文件: {file_to_delete_path} | 用户: {safe_username}")
+            logger.info(f"[删除文件] 开始从向量数据库删除文件: {file_to_delete_path} | 用户: {username}")
             deleted = vector_store.delete_by_file(
                 file_path=str(file_to_delete_path),
-                username=safe_username
+                username=username
             )
             if deleted:
                 logger.info(f"[删除文件] ✅ 文件从向量数据库删除完成: {file_to_delete_path}")

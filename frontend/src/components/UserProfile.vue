@@ -55,8 +55,36 @@
           <div v-if="error" class="error-message">
             {{ error }}
           </div>
+
+          <div class="form-actions">
+            <button class="logout-btn" @click="handleLogout">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+              退出登录
+            </button>
+            <button class="unregister-btn" @click="showUnregisterDialog">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+              注销账号
+            </button>
+          </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        ref="unregisterDialog"
+        title="注销账号"
+        :message="'注销后您的所有数据将被删除，包括上传的文件和会话记录。此操作不可恢复，确定要注销吗？'"
+        confirm-text="注销"
+        cancel-text="取消"
+        type="danger"
+        @confirm="handleUnregister"
+      />
     </div>
   </div>
 </template>
@@ -64,11 +92,14 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { getUserProfile } from '../api/files.js'
+import { unregister } from '../api/auth.js'
+import ConfirmDialog from './ConfirmDialog.vue'
 
-const emit = defineEmits(['close', 'logout', 'switch-user'])
+const emit = defineEmits(['close', 'logout', 'switch-user', 'unregister'])
 
 const loading = ref(true)
 const error = ref('')
+const unregisterDialog = ref(null)
 
 const profile = ref({
   username: '',
@@ -99,6 +130,23 @@ function handleLogout() {
 
 function handleSwitchUser() {
   emit('switch-user')
+}
+
+async function showUnregisterDialog() {
+  const confirmed = await unregisterDialog.value.show()
+  if (confirmed) {
+    await handleUnregister()
+  }
+}
+
+async function handleUnregister() {
+  try {
+    await unregister()
+    emit('unregister')
+    emit('close')
+  } catch (e) {
+    error.value = e.message || '注销失败'
+  }
 }
 
 onMounted(() => {
@@ -283,7 +331,7 @@ onMounted(() => {
 }
 
 .logout-btn,
-.switch-btn {
+.unregister-btn {
   flex: 1;
   display: flex;
   align-items: center;
@@ -313,15 +361,20 @@ onMounted(() => {
   height: 18px;
 }
 
-.switch-btn {
+.unregister-btn {
   border: 1px solid #e2e8f0;
   background: white;
-  color: #475569;
+  color: #dc2626;
 }
 
-.switch-btn:hover {
-  background: #f1f5f9;
-  border-color: #cbd5e1;
+.unregister-btn:hover {
+  background: #fee2e2;
+  border-color: #fecaca;
+}
+
+.unregister-btn svg {
+  width: 18px;
+  height: 18px;
 }
 
 .switch-btn svg {

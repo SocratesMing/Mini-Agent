@@ -206,7 +206,13 @@ async function handleSubmit() {
       token: data.access_token
     })
   } catch (e) {
-    error.value = e.message || (isResetPassword.value ? '密码重置失败' : (isLogin.value ? '登录失败，请重试' : '注册失败，请重试'))
+    if (e.status === 404) {
+      error.value = '用户名不存在'
+    } else if (e.status === 401) {
+      error.value = '密码错误'
+    } else {
+      error.value = e.message || (isResetPassword.value ? '密码重置失败' : (isLogin.value ? '登录失败，请重试' : '注册失败，请重试'))
+    }
   } finally {
     submitting.value = false
   }

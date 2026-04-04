@@ -1135,6 +1135,24 @@ class Database:
             )
             return cursor.rowcount > 0
 
+    def delete_user(self, username: str) -> bool:
+        """删除用户.
+
+        Args:
+            username: 用户名
+
+        Returns:
+            是否删除成功
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            self._execute(
+                cursor,
+                "DELETE FROM users WHERE username = ?",
+                (username,)
+            )
+            return cursor.rowcount > 0
+
     def get_or_create_default_user(self) -> UserModel:
         """获取或创建默认用户.
 
@@ -1143,14 +1161,14 @@ class Database:
         """
         import uuid
         
-        default_user = self.get_user("default")
+        default_user = self.get_user("admin")
         if default_user:
             return default_user
         
         now = datetime.now().isoformat()
         user_data = UserModel(
-            user_id="default",
-            username="default_user",
+            user_id="admin",
+            username="admin",
             organization_id="",
             email="",
             created_at=now,

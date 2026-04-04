@@ -71,7 +71,9 @@ export async function login(username, password) {
 
   if (!response.ok) {
     const error = await response.json()
-    throw new Error(error.detail || '登录失败')
+    const err = new Error(error.detail || '登录失败')
+    err.status = response.status
+    throw err
   }
 
   const data = await response.json()
@@ -100,6 +102,20 @@ export async function register(username, password, email = '') {
 
 export async function logout() {
   clearAuth()
+}
+
+export async function unregister() {
+  const response = await authFetch(`${API_BASE_URL}/api/auth/unregister`, {
+    method: 'DELETE'
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.detail || '注销失败')
+  }
+
+  clearAuth()
+  return await response.json()
 }
 
 export async function resetPassword(username, newPassword) {

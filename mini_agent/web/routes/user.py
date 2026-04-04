@@ -4,11 +4,15 @@
 """
 
 import logging
+import os
+import shutil
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header
 
+from mini_agent.config import Config
 from mini_agent.web.database import Database, get_database
 from mini_agent.web.models import (
     UserProfile,
@@ -69,10 +73,15 @@ async def login(
     db: Annotated[Database, Depends(get_database)],
 ):
     """用户登录."""
+    user = db.get_user_by_username(request.username)
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="用户名不存在")
+    
     user = db.verify_user_password(request.username, request.password)
 
     if not user:
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
+        raise HTTPException(status_code=401, detail="密码错误")
 
     access_token = create_access_token(data={"sub": user.username})
 
@@ -97,18 +106,68 @@ async def reset_password(
     user = db.get_user_by_username(request.username)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    
+
     from mini_agent.web.utils.auth import hash_password
-    
+
     new_password_hash = hash_password(request.new_password)
     success = db.update_user_password(request.username, new_password_hash)
-    
+
     if not success:
         raise HTTPException(status_code=500, detail="密码重置失败")
-    
+
     logger.info(f"密码重置成功 | 用户名: {request.username}")
-    
+
     return {"success": True, "message": "密码重置成功"}
+
+
+@router.delete(
+    "/unregister",
+    summary="注销用户",
+    description="注销当前用户账号，删除用户信息和workspace下的相关文件夹。"
+)
+async def unregister(
+    db: Annotated[Database, Depends(get_database)],
+    authorization: Annotated[Optional[str], Header()] = None,
+):
+    """注销用户账号，删除用户信息和workspace下的相关文件夹."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="未提供认证信息")
+
+    token = authorization.replace("Bearer ", "") if authorization.startswith("Bearer ") else authorization
+    from mini_agent.web.utils.auth import get_username_from_token
+    username = get_username_from_token(token)
+
+    if not username:
+        raise HTTPException(status_code=401, detail="无效的认证信息")
+
+    user = db.get_user_by_username(username)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    env_workspace = Config.get_workspace_dir()
+    if env_workspace:
+        workspace = Path(env_workspace)
+    else:
+        project_root = Path(__file__).parent.parent.parent
+        workspace = project_root / "workspace"
+
+    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
+    user_workspace = workspace / safe_username
+
+    if user_workspace.exists() and user_workspace.is_dir():
+        try:
+            shutil.rmtree(user_workspace)
+            logger.info(f"删除用户workspace | 用户: {username} | 路径: {user_workspace}")
+        except Exception as e:
+            logger.error(f"删除用户workspace失败 | 用户: {username} | 路径: {user_workspace} | 错误: {e}")
+
+    success = db.delete_user(username)
+
+    if not success:
+        raise HTTPException(status_code=500, detail="删除用户失败")
+
+    logger.info(f"用户注销成功 | 用户名: {username}")
+    return {"success": True, "message": "用户注销成功"}
 
 
 @router.get(

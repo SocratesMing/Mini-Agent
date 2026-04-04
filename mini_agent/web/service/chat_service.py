@@ -265,29 +265,81 @@ def get_system_prompt(skill_loader=None):
     return system_prompt
 
 
-def get_workspace_dir(session_id: str, username: str = None):
-    """获取工作目录.
-    
-    Args:
-        session_id: 会话ID
-        username: 用户名，如果提供则返回 username/session_id 隔离的目录
-    """
-    from pathlib import Path
+def _get_base_workspace() -> Path:
+    """获取基础workspace目录."""
     from mini_agent.config import Config
     
     env_workspace = Config.get_workspace_dir()
     if env_workspace:
-        workspace = Path(env_workspace)
+        return Path(env_workspace)
     else:
         project_root = Path(__file__).parent.parent.parent
-        workspace = project_root / "workspace"
+        return project_root / "workspace"
+
+
+def _get_safe_username(username: str) -> str:
+    """获取安全的用户名用于目录名."""
+    return "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
+
+
+def get_user_upload_dir(username: str) -> Path:
+    """获取用户上传目录，如果目录不存在则创建.
     
+    Args:
+        username: 用户名
+        
+    Returns:
+        用户上传目录路径: workspace/username/upload
+    """
+    workspace = _get_base_workspace()
+    safe_username = _get_safe_username(username)
+    upload_dir = workspace / safe_username / "upload"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    return upload_dir
+
+
+def get_user_chat_dir(session_id: str, username: str) -> Path:
+    """获取用户会话目录（仅在实际需要时创建）.
+    
+    Args:
+        session_id: 会话ID
+        username: 用户名
+        
+    Returns:
+        会话目录路径: workspace/username/chat/session_id
+    """
+    workspace = _get_base_workspace()
+    safe_username = _get_safe_username(username)
+    return workspace / safe_username / "chat" / session_id
+
+
+def ensure_user_workspace(username: str) -> Path:
+    """确保用户workspace根目录存在.
+    
+    Args:
+        username: 用户名
+        
+    Returns:
+        用户workspace根目录: workspace/username
+    """
+    workspace = _get_base_workspace()
+    safe_username = _get_safe_username(username)
+    user_workspace = workspace / safe_username
+    user_workspace.mkdir(parents=True, exist_ok=True)
+    return user_workspace
+
+
+def get_workspace_dir(session_id: str, username: str = None):
+    """获取工作目录（会话生成文件的存放位置）.
+    
+    Args:
+        session_id: 会话ID
+        username: 用户名，如果提供则返回 username/chat/session_id 隔离的目录
+    """
     if username:
-        safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
-        session_workspace = workspace / safe_username / session_id
-        return str(session_workspace)
+        return str(get_user_chat_dir(session_id, username))
     
-    return str(workspace)
+    return str(_get_base_workspace())
 
 
 def create_session_agent(session_id: str, llm_client, tools, system_prompt: str, max_steps: int, workspace_dir: str) -> Agent:
@@ -668,7 +720,6 @@ async def chat_stream_generator(
                 
                 done_event = {
                     'type': 'done', 
-                    'session_id': session_id, 
                     'message_id': message_id, 
                     'content': full_response, 
                     'steps': steps, 
@@ -720,6 +771,7 @@ async def chat_non_stream(
     
     session_id = request.session_id
     message_id = request.message_id or str(uuid.uuid4())
+    username = request.username
     sid = session_id[-5:] if session_id else "new"
     
     logger.info(f"[{sid}] 非流式请求 | message: {request.message[:50]}{'...' if len(request.message) > 50 else ''}")

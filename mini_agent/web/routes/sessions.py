@@ -27,6 +27,7 @@ from mini_agent.web.models import (
     UpdateTitleRequest,
 )
 from mini_agent.web.utils.vector_store import get_vector_store
+from mini_agent.web.service.chat_service import get_user_upload_dir, get_user_chat_dir, get_workspace_dir
 
 logger = logging.getLogger(__name__)
 
@@ -205,19 +206,11 @@ async def get_all_files(
     username: Annotated[str, Depends(get_current_username)],
 ):
     """获取当前用户上传的所有文件列表（从文件系统扫描）."""
-    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
-    
-    env_workspace = Config.get_workspace_dir()
-    if env_workspace:
-        workspace = Path(env_workspace)
-    else:
-        workspace = Path("workspace")
-    
-    user_dir = workspace / "users" / safe_username / "files"
+    upload_dir = get_user_upload_dir(username)
     
     files = []
-    if user_dir.exists():
-        for file_path in user_dir.iterdir():
+    if upload_dir.exists():
+        for file_path in upload_dir.iterdir():
             if file_path.is_file():
                 stat = file_path.stat()
                 file_ext = file_path.suffix[1:] if file_path.suffix else "unknown"
@@ -232,7 +225,7 @@ async def get_all_files(
                     "session_title": "",
                 })
     
-    logger.info(f"获取用户文件 | 用户: {username} | 用户目录: {user_dir} | 文件总数: {len(files)}")
+    logger.info(f"获取用户文件 | 用户: {username} | 用户目录: {upload_dir} | 文件总数: {len(files)}")
     if files:
         for f in files:
             logger.debug(f"  - 文件: {f.get('filename')} | 大小: {f.get('size')} | 路径: {f.get('file_path')}")
@@ -253,16 +246,8 @@ async def download_file(
     """下载文件."""
     from fastapi.responses import FileResponse
     
-    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
-    
-    env_workspace = Config.get_workspace_dir()
-    if env_workspace:
-        workspace = Path(env_workspace)
-    else:
-        workspace = Path("workspace")
-    
-    user_dir = workspace / "users" / safe_username / "files"
-    file_path = user_dir / filename
+    upload_dir = get_user_upload_dir(username)
+    file_path = upload_dir / filename
     
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="文件不存在")
@@ -346,15 +331,7 @@ async def delete_session(
     
     db.delete_session(session_id)
     
-    env_workspace = Config.get_workspace_dir()
-    if env_workspace:
-        workspace = Path(env_workspace)
-    else:
-        project_root = Path(__file__).parent.parent.parent
-        workspace = project_root / "workspace"
-    
-    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
-    session_workspace = workspace / "users" / safe_username / session_id
+    session_workspace = get_user_chat_dir(session_id, username)
     
     if session_workspace.exists() and session_workspace.is_dir():
         try:
@@ -412,15 +389,7 @@ async def upload_file(
     file: UploadFile = File(...),
 ):
     """上传文件到会话目录，返回文件路径供 AI 读取."""
-    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
-
-    env_workspace = Config.get_workspace_dir()
-    if env_workspace:
-        workspace = Path(env_workspace)
-    else:
-        workspace = Path("workspace")
-
-    upload_dir = workspace / "users" / safe_username / "files"
+    upload_dir = get_user_upload_dir(username)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
     filename = file.filename or "unknown"
@@ -525,41 +494,28 @@ async def delete_session_file(
     from urllib.parse import unquote
     file_id = unquote(file_id)
 
-    safe_username = "".join(c for c in username if c.isalnum() or c in ('_', '-')) or "user"
-    
-    env_workspace = Config.get_workspace_dir()
-    if env_workspace:
-        workspace = Path(env_workspace)
-    else:
-        workspace = Path("workspace")
-
     if session_id == "files":
         files = []
-        user_dir = workspace / "users" / safe_username / "files"
-        logger.info(f"[删除文件] 搜索文件 | session_id: {session_id} | user_dir: {user_dir} | file_id: {file_id} | safe_username: {safe_username} | username: {username}")
-        logger.info(f"[删除文件] 完整路径: {user_dir / file_id} | exists: {(user_dir / file_id).exists()}")
-        if user_dir.exists():
-            logger.info(f"[删除文件] 用户目录存在，遍历文件...")
-            actual_files = list(user_dir.iterdir())
-            logger.info(f"[删除文件] 目录中的文件列表: {[fp.name for fp in actual_files]}")
-            for fp in user_dir.iterdir():
-                logger.info(f"[删除文件] 比较: fp.name={fp.name} == file_id={file_id} ? {fp.name == file_id}")
-                if fp.is_file() and fp.name == file_id:
-                    logger.info(f"[删除文件] 找到匹配文件: {fp}")
-                    file_to_delete = {
-                        "id": fp.name,
-                        "filename": fp.name,
-                        "file_path": str(fp),
-                        "file_type": fp.suffix[1:] if fp.suffix else "unknown",
-                        "size": fp.stat().st_size,
-                        "username": safe_username,
-                    }
-                    files.append(file_to_delete)
+        upload_dir = get_user_upload_dir(username)
+        file_path_to_delete = upload_dir / file_id
+        logger.info(f"[删除文件] 搜索文件 | session_id: {session_id} | upload_dir: {upload_dir} | file_id: {file_id} | username: {username}")
+        logger.info(f"[删除文件] 完整路径: {file_path_to_delete} | exists: {file_path_to_delete.exists()}")
+        if file_path_to_delete.exists() and file_path_to_delete.is_file():
+            logger.info(f"[删除文件] 找到文件: {file_path_to_delete}")
+            file_to_delete = {
+                "id": file_path_to_delete.name,
+                "filename": file_path_to_delete.name,
+                "file_path": str(file_path_to_delete),
+                "file_type": file_path_to_delete.suffix[1:] if file_path_to_delete.suffix else "unknown",
+                "size": file_path_to_delete.stat().st_size,
+                "username": username,
+            }
+            files.append(file_to_delete)
         else:
-            logger.warning(f"[删除文件] 用户目录不存在: {user_dir}")
+            logger.warning(f"[删除文件] 用户上传目录不存在或文件不存在: {upload_dir}")
 
         if not files:
-            logger.warning(f"[删除文件] 文件不存在 | file_id: {file_id} | 搜索目录: {user_dir}")
+            logger.warning(f"[删除文件] 文件不存在 | file_id: {file_id} | 搜索目录: {upload_dir}")
             raise HTTPException(status_code=404, detail="文件不存在")
         file_to_delete = files[0]
     else:
@@ -578,7 +534,7 @@ async def delete_session_file(
             raise HTTPException(status_code=404, detail="文件不存在")
 
     file_path = file_to_delete['file_path']
-    file_username = file_to_delete.get('username', safe_username)
+    file_username = file_to_delete.get('username', username)
     db_id = file_to_delete.get('id')
 
     async def background_delete(file_path: str, file_username: str, db_id, session_id: str, filename: str):

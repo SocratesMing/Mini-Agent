@@ -283,6 +283,7 @@ function selectPanelFile(file) {
 }
 
 const hasGeneratedFiles = computed(() => {
+  console.log('[Chat DEBUG] props.hasFiles:', props.hasFiles, 'type:', typeof props.hasFiles)
   return props.hasFiles
 })
 

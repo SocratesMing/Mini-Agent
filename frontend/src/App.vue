@@ -41,7 +41,7 @@
         v-if="showUserProfile"
         @close="showUserProfile = false"
         @logout="handleLogout"
-        @switch-user="handleSwitchUser"
+        @unregister="handleUnregister"
       />
       
       <Chat
@@ -148,6 +148,19 @@ async function handleLogout() {
   showWelcome.value = true
 }
 
+async function handleUnregister() {
+  sessions.value = []
+  currentSessionId.value = null
+  messages.value = []
+  userProfile.value = {
+    username: '',
+    organization_id: '',
+    email: ''
+  }
+  showUserProfile.value = false
+  showWelcome.value = true
+}
+
 async function loadUserProfile() {
   const storedToken = getStoredToken()
   const storedUsername = getStoredUsername()
@@ -159,7 +172,7 @@ async function loadUserProfile() {
 
   try {
     const profile = await getUserProfile()
-    if (!profile.username || profile.username === 'default_user') {
+    if (!profile.username || profile.username === 'admin') {
       showWelcome.value = true
       return
     }
@@ -488,6 +501,7 @@ async function handleSendMessage(message, files = [], signal, enableDeepThink = 
     }, signal, enableDeepThink, files, enableKnowledgeBase)
     
     const generatedFiles = await getSessionGeneratedFiles(currentSessionId.value)
+    console.log('[DEBUG] Generated files:', generatedFiles, 'hasFiles:', generatedFiles && generatedFiles.length > 0)
     currentSessionHasFiles.value = generatedFiles && generatedFiles.length > 0
   } catch (e) {
     if (e.name === 'AbortError') {
